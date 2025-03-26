@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  uploadfish:
+    build: .
+    container_name: uploadfish
+    restart: unless-stopped
+    ports:
+      - "8085:8080"
+    volumes:
+      - ./data:/app/data
+      - ./static:/app/static
+    environment:
+      # Core configuration (these are the primary variables)
+      - PORT=8080
+      - MAX_UPLOAD_SIZE=1073741824  # 1GB in bytes
+      - BITCASK_PATH=/app/data
+      - CLEANUP_INTERVAL=1h  # Check for expired files every hour
+      # Uncomment and set this if you're behind a reverse proxy
+      # - BASE_URL=https://upload.fish
+    user: "1000:1000"  # Adjust to match your host user ID if needed
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
