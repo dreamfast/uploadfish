@@ -1,9 +1,11 @@
+{{define "header"}}
 <!DOCTYPE html>
-<html>
+<html {{if .JSClass}}class="{{.JSClass}}"{{end}}>
 <head>
-    <title>Error - UploadFish</title>
+    <title>{{if .Title}}{{.Title}}{{else}}Upload Fish{{end}}</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <link rel="stylesheet" href="/static/css/style.css">
+    <script src="/static/js/main.js"></script>
     
     <!-- Favicon and manifest -->
     <link rel="apple-touch-icon" sizes="180x180" href="/static/favicon/apple-touch-icon.png">
@@ -11,18 +13,11 @@
     <link rel="icon" type="image/png" sizes="16x16" href="/static/favicon/favicon-16x16.png">
     <link rel="manifest" href="/static/site.webmanifest">
     <link rel="icon" href="/static/favicon/favicon.ico">
-    <script src="/static/js/main.js"></script>
 </head>
-<body>
-    <img src="/static/error.png" alt="Upload Fish Error" class="logo">
-    <h1>Upload Error</h1>
-    <div class="error">
-        <p><small>Status code: {{.StatusCode}}</small></p>
-        <p><strong>Error:</strong> {{.ErrorMessage}}</p>
-    </div>
-    
-    <a href="/" class="btn">Upload Another File</a>
-    
-    {{template "footer" .}}
-</body>
-</html> 
+<body {{with .BodyAttrs}}{{.}}{{end}}>
+    {{if not .CustomHeader}}
+    <a href="/">
+        <img src="/static/logo.png" alt="Upload Fish Logo" class="logo">
+    </a>
+    {{end}}
+{{end}} 

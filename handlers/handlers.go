@@ -30,8 +30,26 @@ type Handler struct {
 
 // New creates a new Handler with the given configuration
 func New(cfg *config.Config, store *storage.Storage, csrfProtection *utils.CSRFProtection) *Handler {
-	// Parse templates
-	tmpl := template.Must(template.ParseGlob("templates/*.html"))
+	// Parse templates with dict helper function
+	tmpl := template.Must(template.New("").Funcs(template.FuncMap{
+		"dict": func(values ...interface{}) (map[string]interface{}, error) {
+			if len(values)%2 != 0 {
+				return nil, fmt.Errorf("invalid dict call")
+			}
+			dict := make(map[string]interface{}, len(values)/2)
+			for i := 0; i < len(values); i += 2 {
+				key, ok := values[i].(string)
+				if !ok {
+					return nil, fmt.Errorf("dict keys must be strings")
+				}
+				dict[key] = values[i+1]
+			}
+			return dict, nil
+		},
+		"safe": func(s string) template.HTML {
+			return template.HTML(s)
+		},
+	}).ParseGlob("templates/*.html"))
 
 	return &Handler{
 		Config:         cfg,
@@ -569,4 +587,26 @@ func sanitizeFilename(filename string) string {
 	}
 
 	return sanitized
+}
+
+// Terms renders the terms of service page
+func (h *Handler) Terms(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html")
+	if err := h.Templates.ExecuteTemplate(w, "terms.html", nil); err != nil {
+		http.Error(w, "Error rendering template", http.StatusInternalServerError)
+		LogError(err, "Template error", map[string]interface{}{
+			"template": "terms.html",
+		})
+	}
+}
+
+// Privacy renders the privacy policy page
+func (h *Handler) Privacy(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html")
+	if err := h.Templates.ExecuteTemplate(w, "privacy.html", nil); err != nil {
+		http.Error(w, "Error rendering template", http.StatusInternalServerError)
+		LogError(err, "Template error", map[string]interface{}{
+			"template": "privacy.html",
+		})
+	}
 }

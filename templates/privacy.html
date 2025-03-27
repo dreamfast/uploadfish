@@ -1,0 +1,54 @@
+{{template "header" dict "Title" "Privacy Policy - UploadFish"}}
+    
+    <div class="container legal-content">
+        <h1>Privacy Policy</h1>
+        
+        <section>
+            <h2>1. Information We Collect</h2>
+            <p>UploadFish collects minimal data to operate our service:</p>
+            <ul>
+                <li>Temporary file metadata (file name, size, type, upload time, expiry time)</li>
+                <li>Server logs containing IP addresses and request information</li>
+                <li>Essential cookies for CSRF protection</li>
+            </ul>
+            <p>We do not collect personal information beyond what's necessary to provide the service.</p>
+        </section>
+        
+        <section>
+            <h2>2. Client-Side Encryption</h2>
+            <p>When you enable client-side encryption, your files are encrypted in your browser before being uploaded to our servers. We do not have access to the encryption keys, which are only shared in the URL fragment (#) and never sent to our servers.</p>
+        </section>
+        
+        <section>
+            <h2>3. How We Use Your Information</h2>
+            <p>We use collected information solely to:</p>
+            <ul>
+                <li>Provide the file hosting service</li>
+                <li>Enforce our file expiration policies</li>
+                <li>Prevent abuse of our service</li>
+                <li>Improve service reliability and performance</li>
+            </ul>
+        </section>
+        
+        <section>
+            <h2>4. Data Retention</h2>
+            <p>All uploaded files and associated metadata are automatically deleted when they expire (1 to 72 hours after upload, as selected by you). Server logs are retained for 7 days for technical and security purposes.</p>
+        </section>
+        
+        <section>
+            <h2>5. Security</h2>
+            <p>We implement reasonable security measures to protect your data during transmission and storage. However, no method of electronic transmission or storage is 100% secure. We cannot guarantee absolute security.</p>
+        </section>
+        
+        <section>
+            <h2>6. Changes to This Policy</h2>
+            <p>We may update this privacy policy from time to time. We will notify users of any changes by updating the date at the top of this page.</p>
+        </section>
+        
+        <section>
+            <h2>7. Contact Us</h2>
+            <p>If you have questions about this privacy policy, please contact us through our GitHub repository.</p>
+        </section>
+    </div>
+    
+{{template "footer" .}} 

@@ -545,4 +545,58 @@ body.js .js-enabled {
 .error-message p {
     margin: 0;
     color: #6c757d;
+}
+
+/* Legal Pages (Terms and Privacy) */
+.legal-content {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 20px;
+    line-height: 1.6;
+}
+
+.legal-content h1, 
+.legal-content h2,
+.legal-content h3 {
+    text-align: left;
+}
+
+.legal-content h1 {
+    margin-bottom: 30px;
+    color: #2c3e50;
+}
+
+.legal-content h2 {
+    margin-top: 30px;
+    margin-bottom: 15px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #ddd;
+    color: #333;
+}
+
+.legal-content section {
+    margin-bottom: 30px;
+}
+
+.legal-content ul {
+    padding-left: 20px;
+    margin-bottom: 15px;
+}
+
+.legal-content li {
+    margin-bottom: 8px;
+}
+
+@media (max-width: 768px) {
+    .legal-content {
+        padding: 15px;
+    }
+    
+    .legal-content h1 {
+        font-size: 24px;
+    }
+    
+    .legal-content h2 {
+        font-size: 20px;
+    }
 } 

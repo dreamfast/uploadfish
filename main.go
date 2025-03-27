@@ -123,6 +123,8 @@ func main() {
 	r.Post("/upload", h.Upload)
 	r.Get("/file/{id}", h.ServeFileByID)
 	r.Get("/error", h.ErrorPage)
+	r.Get("/terms", h.Terms)
+	r.Get("/privacy", h.Privacy)
 
 	// Serve static files
 	fileServer := http.FileServer(http.Dir("static"))
