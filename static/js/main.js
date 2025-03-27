@@ -294,6 +294,51 @@ async function handleEncryptedFile(key, fileURL, mimeType) {
         const progressContainer = document.getElementById('decryptionProgress');
         progressContainer.style.display = 'block';
         
+        // First, fetch just a small portion of the file to validate the key
+        const validateResponse = await fetch(fileURL, {
+            headers: {
+                'Range': 'bytes=0-1024' // Request just the first 1KB
+            }
+        });
+        
+        if (!validateResponse.ok) {
+            // If range request is not supported, proceed with normal fetch
+            console.log('Range request not supported, proceeding with full file fetch');
+            return handleFullFileDecryption(key, fileURL, mimeType);
+        }
+        
+        // Try to decrypt the sample
+        const sampleData = await validateResponse.arrayBuffer();
+        
+        try {
+            // Just attempt decryption to see if it succeeds
+            await FileEncryption.decryptFile(sampleData, key, mimeType);
+            
+            // If decryption succeeded, proceed with the full file
+            return handleFullFileDecryption(key, fileURL, mimeType);
+        } catch (decryptError) {
+            // If sample decryption failed, the key is invalid
+            console.error('Key validation failed:', decryptError);
+            document.getElementById('decryptionProgress').style.display = 'none';
+            document.getElementById('encryptionError').style.display = 'block';
+            document.getElementById('encryptionError').textContent = 'Invalid decryption key. The link may be incomplete or incorrect.';
+            hideDownloadOptions();
+        }
+    } catch (error) {
+        console.error('Decryption validation failed:', error);
+        document.getElementById('decryptionProgress').style.display = 'none';
+        document.getElementById('encryptionError').style.display = 'block';
+        hideDownloadOptions();
+    }
+}
+
+// Handle full file decryption after key validation
+async function handleFullFileDecryption(key, fileURL, mimeType) {
+    try {
+        // Show decryption progress
+        const progressContainer = document.getElementById('decryptionProgress');
+        progressContainer.style.display = 'block';
+        
         // Fetch the encrypted file
         const response = await fetch(fileURL);
         if (!response.ok) {
@@ -352,7 +397,57 @@ async function handleEncryptedDownload(key, fileURL, mimeType, filename) {
         const progressContainer = document.getElementById('decryptionProgress');
         const progressText = document.getElementById('decryptionProgressText');
         progressContainer.style.display = 'block';
-        progressText.textContent = 'Preparing download...';
+        progressText.textContent = 'Validating key...';
+        
+        // First, fetch just a small portion of the file to validate the key
+        const validateResponse = await fetch(fileURL, {
+            headers: {
+                'Range': 'bytes=0-1024' // Request just the first 1KB
+            }
+        });
+        
+        if (!validateResponse.ok) {
+            // If range request is not supported, proceed with normal fetch
+            console.log('Range request not supported, proceeding with full file fetch');
+            progressText.textContent = 'Preparing download...';
+            proceedWithEncryptedDownload(key, fileURL, mimeType, filename);
+            return;
+        }
+        
+        // Try to decrypt the sample
+        const sampleData = await validateResponse.arrayBuffer();
+        
+        try {
+            // Just attempt decryption to see if it succeeds
+            await FileEncryption.decryptFile(sampleData, key, mimeType);
+            
+            // If decryption succeeded, proceed with the full file
+            progressText.textContent = 'Key validated, preparing download...';
+            proceedWithEncryptedDownload(key, fileURL, mimeType, filename);
+        } catch (decryptError) {
+            // If sample decryption failed, the key is invalid
+            console.error('Key validation failed:', decryptError);
+            document.getElementById('decryptionProgress').style.display = 'none';
+            document.getElementById('encryptionError').style.display = 'block';
+            document.getElementById('encryptionError').textContent = 'Invalid decryption key. The link may be incomplete or incorrect.';
+            hideDownloadOptions();
+        }
+    } catch (error) {
+        console.error('Download preparation failed:', error);
+        document.getElementById('decryptionProgress').style.display = 'none';
+        document.getElementById('encryptionError').style.display = 'block';
+        hideDownloadOptions();
+    }
+}
+
+// Proceed with encrypted download after key validation
+async function proceedWithEncryptedDownload(key, fileURL, mimeType, filename) {
+    try {
+        // Show decryption progress
+        const progressContainer = document.getElementById('decryptionProgress');
+        const progressText = document.getElementById('decryptionProgressText');
+        progressContainer.style.display = 'block';
+        progressText.textContent = 'Downloading file...';
         
         // Fetch the encrypted file
         const response = await fetch(fileURL);
