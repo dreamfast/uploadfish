@@ -18,7 +18,7 @@ docker compose down 2>/dev/null || true
 # Pull latest changes if this is a git repo
 if [ -d ".git" ]; then
     echo "📥 Pulling latest changes..."
-    git pull
+    git pull origin master
 fi
 
 # Build and start the containers
@@ -42,4 +42,4 @@ else
     echo "📋 Checking logs:"
     docker-compose logs uploadfish
     exit 1
-fi 
+fi

@@ -60,7 +60,12 @@ func main() {
 	if err != nil {
 		Logger.Fatal().Err(err).Msg("Failed to initialize storage")
 	}
-	defer store.Close()
+	defer func(store *storage.Storage) {
+		err := store.Close()
+		if err != nil {
+			Logger.Error().Err(err).Msg("Failed to close storage")
+		}
+	}(store)
 
 	// Initialize rate limiter
 	rateLimiter := utils.NewRateLimiter(cfg.RateLimit, cfg.RateLimitWindow, cfg.RateLimitCleanup)
@@ -81,8 +86,8 @@ func main() {
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   []string{cfg.BaseURL},
 		AllowedMethods:   []string{"GET", "POST", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Content-Type", "X-CSRF-Token"},
-		ExposedHeaders:   []string{"Link"},
+		AllowedHeaders:   []string{"Accept", "Content-Type", "X-CSRF-Token", "Range"},
+		ExposedHeaders:   []string{"Link", "Content-Range", "Accept-Ranges"},
 		AllowCredentials: true,
 		MaxAge:           300,
 	}))
@@ -196,7 +201,7 @@ func securityHeadersMiddleware(next http.Handler) http.Handler {
 				"script-src 'self' 'unsafe-inline'; "+ // Required for inline event handlers
 				"style-src 'self' 'unsafe-inline'; "+ // Required for inline styles
 				"img-src 'self' data: blob:; "+ // Allow images and file previews
-				"media-src 'self' blob:; "+ // For audio/video previews
+				"media-src 'self' data: blob:; "+ // For audio/video previews
 				"connect-src 'self'; "+ // Only allow API calls to same origin
 				"font-src 'self'; "+ // Only allow self-hosted fonts
 				"frame-ancestors 'none'; "+ // Prevent framing

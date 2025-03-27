@@ -15,11 +15,11 @@ class FileEncryption {
         // Generate a random 256-bit key (32 bytes)
         const key = new Uint8Array(32);
         window.crypto.getRandomValues(key);
-        
+
         // Convert to base64 for easier handling in URLs
         return this.arrayBufferToBase64(key);
     }
-    
+
     /**
      * Encrypt a file with the provided base64 key
      * @param {File} file - The file to encrypt
@@ -29,37 +29,37 @@ class FileEncryption {
     static async encryptFile(file, base64Key) {
         // Convert the base64 key back to an array buffer
         const keyData = this.base64ToArrayBuffer(base64Key);
-        
+
         // Create a random initialization vector
         const iv = new Uint8Array(12); // 96 bits for AES-GCM
         window.crypto.getRandomValues(iv);
-        
+
         // Import the key
         const key = await window.crypto.subtle.importKey(
             "raw",
             keyData,
-            { name: "AES-GCM", length: 256 },
+            {name: "AES-GCM", length: 256},
             false,
             ["encrypt"]
         );
-        
+
         // Read the file as an ArrayBuffer
         const fileBuffer = await this.readFileAsArrayBuffer(file);
-        
+
         // Encrypt the file content
         const encryptedContent = await window.crypto.subtle.encrypt(
-            { name: "AES-GCM", iv },
+            {name: "AES-GCM", iv},
             key,
             fileBuffer
         );
-        
+
         // Create a combined buffer: IV + encrypted content
         const combinedBuffer = this.concatArrayBuffers(iv.buffer, encryptedContent);
-        
+
         // Return as a Blob with original file type
-        return new Blob([combinedBuffer], { type: file.type });
+        return new Blob([combinedBuffer], {type: file.type});
     }
-    
+
     /**
      * Decrypt a file with the provided base64 key
      * @param {ArrayBuffer} encryptedData - The encrypted file data
@@ -69,41 +69,51 @@ class FileEncryption {
      */
     static async decryptFile(encryptedData, base64Key, fileType) {
         try {
+            // Check if encryptedData is available and has sufficient length
+            if (!encryptedData || encryptedData.byteLength < 13) {
+                throw new Error(`Encrypted data is invalid (size: ${encryptedData ? encryptedData.byteLength : 'undefined'} bytes)`);
+            }
+
             // Convert the base64 key back to an array buffer
             const keyData = this.base64ToArrayBuffer(base64Key);
-            
+
             // Extract the IV from the beginning of the data (first 12 bytes)
             const iv = new Uint8Array(encryptedData.slice(0, 12));
-            
+
             // Extract the encrypted content (everything after the IV)
             const encryptedContent = new Uint8Array(encryptedData.slice(12));
             
+            // Log the data we're working with
+            if (encryptedContent.length < 1) {
+                throw new Error("No encrypted content found after IV");
+            }
+
             // Import the key
             const key = await window.crypto.subtle.importKey(
                 "raw",
                 keyData,
-                { name: "AES-GCM", length: 256 },
+                {name: "AES-GCM", length: 256},
                 false,
                 ["decrypt"]
             );
-            
+
             // Decrypt the content
             const decryptedContent = await window.crypto.subtle.decrypt(
-                { name: "AES-GCM", iv },
+                {name: "AES-GCM", iv},
                 key,
                 encryptedContent
             );
-            
+
             // Return as a Blob with original file type
-            return new Blob([decryptedContent], { type: fileType });
+            return new Blob([decryptedContent], {type: fileType});
         } catch (error) {
             console.error("Decryption failed:", error);
             throw new Error("Failed to decrypt file. The encryption key may be incorrect.");
         }
     }
-    
+
     // Helper methods
-    
+
     /**
      * Read a file as an ArrayBuffer
      * @param {File} file - The file to read
@@ -117,7 +127,7 @@ class FileEncryption {
             reader.readAsArrayBuffer(file);
         });
     }
-    
+
     /**
      * Concatenate two ArrayBuffers
      * @param {ArrayBuffer} buffer1 - First buffer
@@ -130,7 +140,7 @@ class FileEncryption {
         tmp.set(new Uint8Array(buffer2), buffer1.byteLength);
         return tmp.buffer;
     }
-    
+
     /**
      * Convert ArrayBuffer to base64 string
      * @param {ArrayBuffer|Uint8Array} buffer - Buffer to convert
@@ -147,60 +157,70 @@ class FileEncryption {
             .replace(/\//g, '_')
             .replace(/=/g, '');
     }
-    
+
     /**
      * Convert base64 string to ArrayBuffer
      * @param {string} base64 - Base64 encoded string
      * @returns {ArrayBuffer} - Decoded array buffer
      */
     static base64ToArrayBuffer(base64) {
+
         // Restore standard base64 for atob
         base64 = base64.replace(/-/g, '+').replace(/_/g, '/');
+
         // Add padding if needed
         while (base64.length % 4 !== 0) {
             base64 += '=';
         }
-        
-        const binary = atob(base64);
-        const bytes = new Uint8Array(binary.length);
-        for (let i = 0; i < binary.length; i++) {
-            bytes[i] = binary.charCodeAt(i);
+
+
+        try {
+            const binary = atob(base64);
+
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) {
+                bytes[i] = binary.charCodeAt(i);
+            }
+
+            return bytes.buffer;
+        } catch (e) {
+            console.error('Error in base64ToArrayBuffer:', e);
+            throw new Error('Invalid encryption key format: ' + e.message);
         }
-        return bytes.buffer;
     }
-    
+
     /**
      * Check if encryption is supported in this browser
      * @returns {boolean} - True if encryption is supported
      */
     static isEncryptionSupported() {
-        return window.crypto && 
-               window.crypto.subtle && 
-               typeof window.crypto.subtle.encrypt === 'function';
+        return window.crypto &&
+            window.crypto.subtle &&
+            typeof window.crypto.subtle.encrypt === 'function';
     }
 }
 
 // Common initialization when DOM is loaded
-document.addEventListener('DOMContentLoaded', function() {   
+document.addEventListener('DOMContentLoaded', function () {
     // Apply JS class to both html and body elements
     document.documentElement.classList.add('js');
     document.body.classList.add('js');
-    
+
     // Explicitly hide/show elements based on JS support
     const hideElements = document.querySelectorAll('.js-disabled');
     const showElements = document.querySelectorAll('.js-enabled');
-    
+
     hideElements.forEach(el => el.style.display = 'none');
     showElements.forEach(el => el.style.display = 'block');
-    
+
     // Check if encryption is supported and show warning if not
     if (!FileEncryption.isEncryptionSupported()) {
         showEncryptionWarning();
     }
-    
+
     // Initialize the uploader functionality if we're on the upload page
     initializeUploader();
-    
+
     // Initialize the preview page functionality
     initializePreviewPage();
 });
@@ -211,11 +231,11 @@ function showEncryptionWarning() {
     if (encryptionCheckbox) {
         encryptionCheckbox.checked = false;
         encryptionCheckbox.disabled = true;
-        
+
         const warning = document.createElement('div');
         warning.className = 'encryption-warning';
         warning.innerHTML = '<p>Your browser does not support secure encryption. Files will be uploaded unencrypted.</p>';
-        
+
         const parent = encryptionCheckbox.closest('.form-group');
         parent.appendChild(warning);
     }
@@ -226,15 +246,15 @@ function initializePreviewPage() {
     // Check if we're on the preview page
     const previewContainer = document.getElementById('previewContainer');
     if (!previewContainer) return;
-    
+
     // Initialize copy link button functionality
     const copyButton = document.getElementById('copyLinkBtn');
     if (copyButton) {
-        copyButton.addEventListener('click', function() {
+        copyButton.addEventListener('click', function () {
             copyToClipboard();
         });
     }
-    
+
     // Handle encrypted file display and decryption
     handleEncryptedPreview();
 }
@@ -247,32 +267,86 @@ function handleEncryptedPreview() {
     const fileURL = body.getAttribute('data-file-url');
     const mimeType = body.getAttribute('data-mime-type');
     const filename = body.getAttribute('data-filename');
-    
+
     if (isEncrypted) {
         document.getElementById('encryptionNotice').style.display = 'flex';
-        
+
         // Get the encryption key from the URL fragment
         const encryptionKey = window.location.hash.substring(1);
-        if (encryptionKey) {
-            handleEncryptedFile(encryptionKey, fileURL, mimeType);
+
+        // Validate key format first
+        if (encryptionKey && validateEncryptionKeyFormat(encryptionKey)) {
+            // Format looks valid, but we won't load preview for encrypted files
+            document.getElementById('encryptionError').style.display = 'none';
+
+            // Show the download section instead
+            const downloadSection = document.getElementById('fileActions');
+            if (downloadSection) {
+                downloadSection.style.display = 'flex';
+            }
+            // Insert this message before the download button
         } else {
+            // Invalid key format
             document.getElementById('encryptionError').style.display = 'block';
+            document.getElementById('encryptionError').textContent = 'Invalid encryption key format. The link may be incomplete or incorrect.';
             hideDownloadOptions();
         }
-        
+
         // Update download button to include the key in the URL
         const downloadBtn = document.getElementById('downloadBtn');
         if (downloadBtn && encryptionKey) {
             const currentHref = downloadBtn.getAttribute('href');
             downloadBtn.setAttribute('href', currentHref + '#' + encryptionKey);
-            
+
             // For direct downloads, we need to handle it with JS
-            downloadBtn.addEventListener('click', function(e) {
+            downloadBtn.addEventListener('click', function (e) {
                 e.preventDefault();
                 handleEncryptedDownload(encryptionKey, fileURL, mimeType, filename);
             });
         }
     }
+}
+
+// Hide preview containers for encrypted files
+function hidePreviewContainers() {
+    // Hide all preview containers
+    const previewContainers = [
+        document.getElementById('previewContainer'),
+        document.getElementById('previewImage'),
+        document.getElementById('previewVideo'),
+        document.getElementById('previewAudio')
+    ];
+
+    previewContainers.forEach(container => {
+        if (container) {
+            container.style.display = 'none';
+        }
+    });
+
+    // Hide any progress indicators
+    const progressContainer = document.getElementById('decryptionProgress');
+    if (progressContainer) {
+        progressContainer.style.display = 'none';
+    }
+}
+
+/**
+ * Validate the encryption key format
+ * @param {string} key - The encryption key to validate
+ * @returns {boolean} - True if the key format is valid
+ */
+function validateEncryptionKeyFormat(key) {
+
+    if (!key) {
+        console.error('Key is empty or undefined');
+        return false;
+    }
+
+    // Base64 URL-safe format validation (no padding)
+    // Should consist of letters, numbers, hyphens, and underscores
+    // Length should be appropriate for a 256-bit key (32 bytes = ~43 base64 chars)
+    const keyRegex = /^[A-Za-z0-9_-]{42,44}$/;
+    return keyRegex.test(key);
 }
 
 // Hide download options when decryption fails
@@ -281,161 +355,122 @@ function hideDownloadOptions() {
     const downloadBtn = document.getElementById('downloadBtn');
     const copyLinkBtn = document.getElementById('copyLinkBtn');
     const downloadTip = document.getElementById('downloadTip');
-    
+
     if (downloadBtn) downloadBtn.style.display = 'none';
     if (copyLinkBtn) copyLinkBtn.style.display = 'none';
     if (downloadTip) downloadTip.style.display = 'none';
 }
 
-// Handle encrypted file preview
-async function handleEncryptedFile(key, fileURL, mimeType) {
-    try {
-        // Show decryption progress
-        const progressContainer = document.getElementById('decryptionProgress');
-        progressContainer.style.display = 'block';
-        
-        // First, fetch just a small portion of the file to validate the key
-        const validateResponse = await fetch(fileURL, {
-            headers: {
-                'Range': 'bytes=0-1024' // Request just the first 1KB
-            }
-        });
-        
-        if (!validateResponse.ok) {
-            // If range request is not supported, proceed with normal fetch
-            console.log('Range request not supported, proceeding with full file fetch');
-            return handleFullFileDecryption(key, fileURL, mimeType);
-        }
-        
-        // Try to decrypt the sample
-        const sampleData = await validateResponse.arrayBuffer();
-        
-        try {
-            // Just attempt decryption to see if it succeeds
-            await FileEncryption.decryptFile(sampleData, key, mimeType);
-            
-            // If decryption succeeded, proceed with the full file
-            return handleFullFileDecryption(key, fileURL, mimeType);
-        } catch (decryptError) {
-            // If sample decryption failed, the key is invalid
-            console.error('Key validation failed:', decryptError);
-            document.getElementById('decryptionProgress').style.display = 'none';
-            document.getElementById('encryptionError').style.display = 'block';
-            document.getElementById('encryptionError').textContent = 'Invalid decryption key. The link may be incomplete or incorrect.';
-            hideDownloadOptions();
-        }
-    } catch (error) {
-        console.error('Decryption validation failed:', error);
-        document.getElementById('decryptionProgress').style.display = 'none';
-        document.getElementById('encryptionError').style.display = 'block';
-        hideDownloadOptions();
-    }
-}
-
-// Handle full file decryption after key validation
-async function handleFullFileDecryption(key, fileURL, mimeType) {
-    try {
-        // Show decryption progress
-        const progressContainer = document.getElementById('decryptionProgress');
-        progressContainer.style.display = 'block';
-        
-        // Fetch the encrypted file
-        const response = await fetch(fileURL);
-        if (!response.ok) {
-            throw new Error('Failed to fetch file');
-        }
-        
-        // Get the encrypted data
-        const encryptedData = await response.arrayBuffer();
-        
-        // Decrypt the file
-        const decryptedBlob = await FileEncryption.decryptFile(encryptedData, key, mimeType);
-        
-        // Create object URL for the decrypted file
-        const objectURL = URL.createObjectURL(decryptedBlob);
-        
-        // Update preview based on file type
-        updatePreview(objectURL, mimeType);
-        
-        // Hide progress
-        progressContainer.style.display = 'none';
-        
-        // Show preview container
-        document.getElementById('previewContainer').style.display = 'block';
-    } catch (error) {
-        console.error('Decryption failed:', error);
-        document.getElementById('decryptionProgress').style.display = 'none';
-        document.getElementById('encryptionError').style.display = 'block';
-        hideDownloadOptions();
-    }
-}
-
-// Update the preview with decrypted content
-function updatePreview(objectURL, mimeType) {
-    if (mimeType.startsWith('image/')) {
-        const img = document.getElementById('previewImage');
-        if (img) img.src = objectURL;
-    } else if (mimeType.startsWith('video/')) {
-        const source = document.getElementById('previewVideoSource');
-        if (source) {
-            source.src = objectURL;
-            document.getElementById('previewVideo').load();
-        }
-    } else if (mimeType.startsWith('audio/')) {
-        const source = document.getElementById('previewAudioSource');
-        if (source) {
-            source.src = objectURL;
-            document.getElementById('previewAudio').load();
-        }
-    }
-}
-
 // Handle direct download of encrypted file
 async function handleEncryptedDownload(key, fileURL, mimeType, filename) {
     try {
+        // First validate the key format
+        if (!validateEncryptionKeyFormat(key)) {
+            throw new Error('Invalid encryption key format');
+        }
+
+
         // Show decryption progress
         const progressContainer = document.getElementById('decryptionProgress');
         const progressText = document.getElementById('decryptionProgressText');
         progressContainer.style.display = 'block';
-        progressText.textContent = 'Validating key...';
-        
-        // First, fetch just a small portion of the file to validate the key
-        const validateResponse = await fetch(fileURL, {
-            headers: {
-                'Range': 'bytes=0-1024' // Request just the first 1KB
-            }
-        });
-        
-        if (!validateResponse.ok) {
-            // If range request is not supported, proceed with normal fetch
-            console.log('Range request not supported, proceeding with full file fetch');
-            progressText.textContent = 'Preparing download...';
-            proceedWithEncryptedDownload(key, fileURL, mimeType, filename);
+        progressText.textContent = 'Preparing download...';
+
+        // Flag to track if we should try full download
+        let shouldTryFullDownload = false;
+
+        // Try the full download directly for fresh uploads
+        // The URL fragment (key) in the address bar indicates this is likely a fresh upload
+        if (window.location.hash && window.location.hash.substring(1) === key) {
+            progressText.textContent = 'Downloading file...';
+            await proceedWithEncryptedDownload(key, fileURL, mimeType, filename);
             return;
         }
-        
-        // Try to decrypt the sample
-        const sampleData = await validateResponse.arrayBuffer();
-        
+
+        // Try to get just the first few KB to validate the key
         try {
-            // Just attempt decryption to see if it succeeds
-            await FileEncryption.decryptFile(sampleData, key, mimeType);
+            // Use fetch with range header to get just the first 4KB
+            const validateResponse = await fetch(fileURL, {
+                headers: {
+                    'Range': 'bytes=0-4095'  // First 4KB should include the IV (12 bytes) + some encrypted data
+                },
+                // Ensure credentials aren't sent to avoid CORS preflight
+                credentials: 'omit',
+                // Allow CORS
+                mode: 'cors'
+            });
             
-            // If decryption succeeded, proceed with the full file
-            progressText.textContent = 'Key validated, preparing download...';
-            proceedWithEncryptedDownload(key, fileURL, mimeType, filename);
-        } catch (decryptError) {
-            // If sample decryption failed, the key is invalid
-            console.error('Key validation failed:', decryptError);
-            document.getElementById('decryptionProgress').style.display = 'none';
-            document.getElementById('encryptionError').style.display = 'block';
-            document.getElementById('encryptionError').textContent = 'Invalid decryption key. The link may be incomplete or incorrect.';
-            hideDownloadOptions();
+            // Check if range request was successful
+            if (validateResponse.status === 206) {  // 206 Partial Content
+                
+                // Get content length to see if the full file is small
+                const contentLength = validateResponse.headers.get('content-length');
+                const contentRange = validateResponse.headers.get('content-range');
+                
+                // If content range indicates this is a small file (< 8KB), just download the whole thing
+                if (contentRange && contentRange.includes('/') &&
+                    parseInt(contentRange.split('/')[1]) < 8192) {
+                    shouldTryFullDownload = true;
+                    return;
+                }
+                
+                // Get the sample data
+                const sampleData = await validateResponse.arrayBuffer();
+                
+                // Check if sample data is large enough to contain IV (12 bytes) plus some data
+                if (sampleData.byteLength < 20) {
+                    shouldTryFullDownload = true;
+                    return;
+                }
+                
+                try {
+                    // Try to decrypt the sample
+                    await FileEncryption.decryptFile(sampleData, key, mimeType);
+                    
+                    // If we get here, decryption succeeded, so the key is valid
+                    progressText.textContent = 'Key validated, downloading file...';
+                    
+                    // Proceed with full file download
+                    await proceedWithEncryptedDownload(key, fileURL, mimeType, filename);
+                    return;
+                } catch (validationError) {
+                    // If validation failed, but this is a fresh upload (URL has the key in fragment),
+                    // we'll still try the full download as it might be a false negative
+                    if (window.location.hash && window.location.hash.substring(1) === key) {
+                        shouldTryFullDownload = true;
+                    } else {
+                        throw new Error('Invalid decryption key. The file cannot be decrypted with this key.');
+                    }
+                }
+            } else {
+                // Range request not supported or not configured on server
+                shouldTryFullDownload = true;  // Only try full download if range request wasn't supported
+            }
+        } catch (rangeError) {
+            // If there was an error with the range request (could be CORS, server config, etc.)
+            if (rangeError.message.includes('Invalid decryption key') && 
+                !(window.location.hash && window.location.hash.substring(1) === key)) {
+                // This is from our validation, so propagate the error
+                // But skip this check for fresh uploads
+                throw rangeError;
+            }
+            shouldTryFullDownload = true;  // Only try full download if range request failed completely
+        }
+
+        // If we should try full download (only if range request wasn't supported or failed completely)
+        if (shouldTryFullDownload) {
+            // Proceed with downloading the full file
+            progressText.textContent = 'Downloading file...';
+            await proceedWithEncryptedDownload(key, fileURL, mimeType, filename);
+        } else {
+            // If we got here without shouldTryFullDownload being true, something unusual happened
+            throw new Error('Key validation process failed');
         }
     } catch (error) {
         console.error('Download preparation failed:', error);
         document.getElementById('decryptionProgress').style.display = 'none';
         document.getElementById('encryptionError').style.display = 'block';
+        document.getElementById('encryptionError').textContent = error.message || 'Failed to prepare download';
         hideDownloadOptions();
     }
 }
@@ -448,40 +483,65 @@ async function proceedWithEncryptedDownload(key, fileURL, mimeType, filename) {
         const progressText = document.getElementById('decryptionProgressText');
         progressContainer.style.display = 'block';
         progressText.textContent = 'Downloading file...';
-        
+
+
         // Fetch the encrypted file
-        const response = await fetch(fileURL);
+        const response = await fetch(fileURL, {
+            // Ensure credentials aren't sent to avoid CORS preflight
+            credentials: 'omit',
+            // Allow CORS
+            mode: 'cors'
+        });
         if (!response.ok) {
             throw new Error('Failed to fetch file');
         }
-        
+
+        // Log response details
+
         // Get the encrypted data
         const encryptedData = await response.arrayBuffer();
-        
+
+        // Check if we have a valid size
+        if (encryptedData.byteLength < 20) {
+            console.error('Downloaded data is too small to be a valid encrypted file');
+            throw new Error('Downloaded data appears to be invalid (too small)');
+        }
+
+        // Log first few bytes for debugging
+        const firstBytes = new Uint8Array(encryptedData.slice(0, 16));
+
         progressText.textContent = 'Decrypting...';
-        
-        // Decrypt the file
-        const decryptedBlob = await FileEncryption.decryptFile(encryptedData, key, mimeType);
-        
-        // Trigger download
-        progressText.textContent = 'Download starting...';
-        
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(decryptedBlob);
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        
-        // Hide progress after a short delay
-        setTimeout(() => {
+
+        try {
+            // Decrypt the file
+            const decryptedBlob = await FileEncryption.decryptFile(encryptedData, key, mimeType);
+
+            // Trigger download
+            progressText.textContent = 'Download starting...';
+
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(decryptedBlob);
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+
+            // Hide progress after a short delay
+            setTimeout(() => {
+                progressContainer.style.display = 'none';
+            }, 1000);
+        } catch (decryptError) {
+            console.error('Decryption failed:', decryptError);
             progressContainer.style.display = 'none';
-        }, 1000);
-        
+            document.getElementById('encryptionError').style.display = 'block';
+            document.getElementById('encryptionError').textContent = 'Decryption failed: ' + decryptError.message;
+            hideDownloadOptions();
+        }
     } catch (error) {
         console.error('Download failed:', error);
         document.getElementById('decryptionProgress').style.display = 'none';
         document.getElementById('encryptionError').style.display = 'block';
+        document.getElementById('encryptionError').textContent = 'Download failed: ' + error.message;
         hideDownloadOptions();
     }
 }
@@ -490,7 +550,7 @@ async function proceedWithEncryptedDownload(key, fileURL, mimeType, filename) {
 function copyToClipboard() {
     // Include the full URL with the hash fragment
     const link = window.location.href;
-    
+
     if (!navigator.clipboard) {
         // Fallback for browsers without clipboard API
         const textArea = document.createElement('textarea');
@@ -500,18 +560,18 @@ function copyToClipboard() {
         document.body.appendChild(textArea);
         textArea.focus();
         textArea.select();
-        
+
         try {
             document.execCommand('copy');
             updateCopyButton('Copied!');
         } catch (err) {
             console.error('Fallback: Could not copy text: ', err);
         }
-        
+
         document.body.removeChild(textArea);
         return;
     }
-    
+
     navigator.clipboard.writeText(link)
         .then(() => updateCopyButton('Copied!'))
         .catch(err => console.error('Failed to copy link:', err));
@@ -521,10 +581,10 @@ function copyToClipboard() {
 function updateCopyButton(text) {
     const btn = document.getElementById('copyLinkBtn');
     if (!btn) return;
-    
+
     const originalText = btn.textContent;
     btn.textContent = text;
-    
+
     setTimeout(() => {
         btn.textContent = originalText;
     }, 2000);
@@ -534,10 +594,10 @@ function updateCopyButton(text) {
 function initializeUploader() {
     const dropZone = document.getElementById('dropZone');
     const fileInput = document.getElementById('fileInput');
-    
+
     // If uploader elements don't exist, we're not on the upload page
     if (!dropZone || !fileInput) return;
-    
+
     const formFileInput = document.getElementById('formFileInput');
     const formExpiryInput = document.getElementById('formExpiryInput');
     const formEncryptedInput = document.getElementById('formEncryptedInput');
@@ -548,16 +608,16 @@ function initializeUploader() {
     const progressContainer = document.getElementById('progressContainer');
     const progressBar = document.getElementById('progressBar');
     const progressText = document.getElementById('progressText');
-    
+
     // Check if encryption is available in this browser
     const isEncryptionSupported = FileEncryption.isEncryptionSupported();
-    
+
     // If encryption is not supported, disable the option
     if (!isEncryptionSupported && encryptionEnabled) {
         encryptionEnabled.checked = false;
         encryptionEnabled.disabled = true;
     }
-    
+
     // Fish-related processing phrases
     const fishProcessingPhrases = [
         "Catching your fish...",
@@ -601,7 +661,7 @@ function initializeUploader() {
         "Measuring the data depth...",
         "Navigating the data waters..."
     ];
-    
+
     // Encryption-specific phrases
     const encryptionPhrases = [
         "Encrypting your fish...",
@@ -615,81 +675,81 @@ function initializeUploader() {
         "Making your data invisible...",
         "Protecting with underwater shields..."
     ];
-    
+
     // Track the last used phrase index to avoid immediate repetition
     let lastPhraseIndex = -1;
-    
+
     // Get random fish phrase
     function getRandomFishPhrase() {
         let randomIndex;
         do {
             randomIndex = Math.floor(Math.random() * fishProcessingPhrases.length);
         } while (randomIndex === lastPhraseIndex && fishProcessingPhrases.length > 1);
-        
+
         lastPhraseIndex = randomIndex;
         return "90% - " + fishProcessingPhrases[randomIndex];
     }
-    
+
     // Get random encryption phrase
     function getRandomEncryptionPhrase() {
         return encryptionPhrases[Math.floor(Math.random() * encryptionPhrases.length)];
     }
-    
+
     // Get max file size from the UI
     function getMaxFileSize() {
         const infoElement = document.querySelector('.info strong');
         if (!infoElement) return 1024; // Default to 1GB
-        
+
         const sizeText = infoElement.innerText;
         const match = sizeText.match(/(\d+)/);
         return match && match[1] ? parseInt(match[1], 10) : 1024;
     }
-    
+
     // Get max file size
     const maxSizeMB = getMaxFileSize();
     const maxSizeBytes = maxSizeMB * 1024 * 1024; // Convert to bytes
-    
+
     // Event listeners
     selectFileBtn.addEventListener('click', () => fileInput.click());
     fileInput.addEventListener('change', handleFileSelection);
-    
+
     // Setup drag and drop
     dropZone.addEventListener('dragover', e => {
         e.preventDefault();
         dropZone.classList.add('highlight');
     });
-    
+
     dropZone.addEventListener('dragleave', () => {
         dropZone.classList.remove('highlight');
     });
-    
+
     dropZone.addEventListener('drop', e => {
         e.preventDefault();
         dropZone.classList.remove('highlight');
-        
+
         if (e.dataTransfer.files.length) {
             fileInput.files = e.dataTransfer.files;
             handleFileSelection();
         }
     });
-    
+
     // Handle file selection and upload
     function handleFileSelection() {
         if (!fileInput.files.length) return;
-        
+
         const file = fileInput.files[0];
-        
+
         // Check file size before attempting to upload
         if (file.size > maxSizeBytes) {
             showError(`File too large (${formatFileSize(file.size)}). Maximum size is ${maxSizeMB} MB.`);
             fileInput.value = '';
             return;
         }
-        
+
         // Prepare upload
         prepareUpload(file);
     }
-    
+
     // Prepare the upload form
     function prepareUpload(file) {
         // Show and reset progress bar
@@ -697,63 +757,67 @@ function initializeUploader() {
         progressBar.style.backgroundColor = '#4CAF50';
         progressBar.style.width = '0%';
         progressText.textContent = '0%';
-        
+
         // Set and validate the expiry option
         const expiryValue = jsExpiry.value;
         const validExpiryValues = ["1h", "6h", "24h", "72h"];
-        
+
         if (validExpiryValues.includes(expiryValue)) {
             formExpiryInput.value = expiryValue;
         } else {
             console.warn(`Invalid expiry value: ${expiryValue}, using default`);
             formExpiryInput.value = "1h"; // Default to 1 hour if invalid
         }
-        
+
         // Check if encryption is enabled and supported
-        const shouldEncrypt = encryptionEnabled && 
-                             encryptionEnabled.checked && 
-                             isEncryptionSupported;
-        
+        const shouldEncrypt = encryptionEnabled &&
+            encryptionEnabled.checked &&
+            isEncryptionSupported;
+
         formEncryptedInput.value = shouldEncrypt ? "true" : "false";
-        
+
         if (shouldEncrypt) {
             // Update progress to show encryption state
             updateProgress(20, getRandomEncryptionPhrase());
-            
+
             // Encrypt the file before upload
-            encryptAndUpload(file);
+            encryptAndUpload(file).catch(error => {
+                // This ensures any unhandled errors are properly shown to the user
+                console.error('Upload process failed:', error);
+                showError('Upload failed: ' + error.message);
+            });
         } else {
             // If not encrypting, proceed with normal upload
             processRegularUpload(file);
         }
     }
-    
+
     // Handle encryption and upload
     async function encryptAndUpload(file) {
         try {
             // Generate a random encryption key
             const encryptionKey = await FileEncryption.generateKey();
-            
+
             // Update progress
             updateProgress(40, "Encrypting your file...");
-            
+
             // Encrypt the file
             const encryptedBlob = await FileEncryption.encryptFile(file, encryptionKey);
-            
+
             // Update progress
             updateProgress(70, "File encrypted! Preparing upload...");
-            
+
             // Create a File object from the encrypted blob
             const encryptedFile = new File([encryptedBlob], file.name, {
                 type: file.type,
                 lastModified: file.lastModified
             });
-            
+
             // Copy the encrypted file to the form's file input
             const dataTransfer = new DataTransfer();
             dataTransfer.items.add(encryptedFile);
             formFileInput.files = dataTransfer.files;
-            
+
             // Send the upload request
             sendUploadRequest(encryptionKey);
         } catch (error) {
@@ -761,26 +825,26 @@ function initializeUploader() {
             showError('Encryption failed: ' + error.message);
         }
     }
-    
+
     // Process regular, unencrypted upload
     function processRegularUpload(file) {
         // Copy the selected file to the form's file input
         const dataTransfer = new DataTransfer();
         dataTransfer.items.add(file);
         formFileInput.files = dataTransfer.files;
-        
+
         // Send the upload request
         sendUploadRequest();
     }
-    
+
     // Send the upload request with progress tracking
     function sendUploadRequest(encryptionKey = null) {
         const formData = new FormData(uploadForm);
         ensureCsrfToken(formData);
-        
+
         const xhr = new XMLHttpRequest();
         xhr.open('POST', '/upload', true);
-        
+
         // Track upload progress
         xhr.upload.onprogress = e => {
             if (e.lengthComputable) {
@@ -790,18 +854,18 @@ function initializeUploader() {
                 updateProgress(percent);
             }
         };
-        
+
         // When upload is complete but before server processing is done
         xhr.upload.onload = () => {
             updateProgress(90, getRandomFishPhrase());
         };
-        
+
         // Handle response
-        xhr.onload = function() {
+        xhr.onload = function () {
             if (xhr.status >= 200 && xhr.status < 400) {
                 // Success handling
                 updateProgress(100, '100% - Complete!');
-                
+
                 // Add a small delay before redirect to show the completion
                 setTimeout(() => {
                     // Check if we have an encryption key to append to the URL
@@ -816,11 +880,11 @@ function initializeUploader() {
                 handleUploadError(xhr);
             }
         };
-        
+
         xhr.onerror = () => showError('Network error during upload.');
         xhr.send(formData);
     }
-    
+
     // Ensure CSRF token is included
     function ensureCsrfToken(formData) {
         const csrfToken = document.getElementById('formCsrfToken').value;
@@ -828,13 +892,13 @@ function initializeUploader() {
             formData.set('csrf_token', csrfToken);
         }
     }
-    
+
     // Update progress bar
     function updateProgress(percent, text) {
         // Apply transition for smoother animation
         progressBar.style.transition = 'width 0.3s ease-in-out';
         progressBar.style.width = percent + '%';
-        
+
         // Update text with custom message or percentage
         if (text) {
             progressText.textContent = text;
@@ -848,36 +912,35 @@ function initializeUploader() {
                 progressText.textContent = percent + '% - Complete!';
             }
         }
-        
+
         // Update color based on state
         if (percent === 100) {
             progressBar.style.backgroundColor = '#27ae60'; // Darker green for completion
         }
     }
-    
+
     // Handle redirect after successful upload
     function redirect(xhr, encryptionKey = null) {
         let location = xhr.getResponseHeader('Location') || xhr.responseURL;
-        
+
         // If we have an encryption key, append it as a URL fragment
         if (location && encryptionKey) {
             location += '#' + encryptionKey;
         }
-        
+
         if (location) {
             window.location.href = location;
         } else {
             window.location.href = '/';
         }
     }
-    
+
     // Handle upload errors
     function handleUploadError(xhr) {
         progressBar.style.backgroundColor = '#e74c3c';
-        const errorMessage = parseErrorMessage(xhr) || 'Upload failed! Server returned status ' + xhr.status;
-        progressText.textContent = errorMessage;
+        progressText.textContent = parseErrorMessage(xhr) || 'Upload failed! Server returned status ' + xhr.status;
     }
-    
+
     // Show error message in progress area
     function showError(message) {
         progressContainer.style.display = 'block';
@@ -885,11 +948,11 @@ function initializeUploader() {
         progressBar.style.backgroundColor = '#e74c3c';
         progressText.textContent = 'Error: ' + message;
     }
-    
+
     // Try to extract error message from HTML response
     function parseErrorMessage(xhr) {
         if (!xhr.responseText || !xhr.responseText.includes('Error:')) return null;
-        
+
         try {
             const parser = new DOMParser();
             const doc = parser.parseFromString(xhr.responseText, 'text/html');
@@ -910,4 +973,24 @@ function formatFileSize(bytes) {
     else if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
     else if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + ' MB';
     else return (bytes / 1073741824).toFixed(1) + ' GB';
-} 
+}
+
+// Update the preview with decrypted content
+function updatePreview(objectURL, mimeType) {
+    if (mimeType.startsWith('image/')) {
+        const img = document.getElementById('previewImage');
+        if (img) img.src = objectURL;
+    } else if (mimeType.startsWith('video/')) {
+        const source = document.getElementById('previewVideoSource');
+        if (source) {
+            source.src = objectURL;
+            document.getElementById('previewVideo').load();
+        }
+    } else if (mimeType.startsWith('audio/')) {
+        const source = document.getElementById('previewAudioSource');
+        if (source) {
+            source.src = objectURL;
+            document.getElementById('previewAudio').load();
+        }
+    }
+}

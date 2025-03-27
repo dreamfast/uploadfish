@@ -48,7 +48,7 @@ func LogHTTPRequest(r *http.Request, status, bytes int, latency time.Duration) {
 	}
 
 	// Log the request with structured fields
-	log := Logger.Info().
+	fishLog := Logger.Info().
 		Str("method", r.Method).
 		Str("path", path).
 		Int("status", status).
@@ -58,10 +58,10 @@ func LogHTTPRequest(r *http.Request, status, bytes int, latency time.Duration) {
 
 	// Add content length if available
 	if bytes > 0 {
-		log = log.Int("bytes", bytes)
+		fishLog = fishLog.Int("bytes", bytes)
 	}
 
-	log.Msg("Request processed")
+	fishLog.Msg("Request processed")
 }
 
 // LogError logs an error with additional context
