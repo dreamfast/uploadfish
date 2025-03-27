@@ -407,4 +407,142 @@ body.js .js-enabled {
     .file-details {
         padding: 15px;
     }
+}
+
+/* Add these styles for encryption-related UI elements */
+
+/* Encryption option container */
+.form-options {
+    margin-bottom: 20px;
+}
+
+.encryption-option {
+    display: flex;
+    align-items: center;
+    margin-top: 10px;
+}
+
+.encryption-option label {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+}
+
+.encryption-option input[type="checkbox"] {
+    margin-right: 8px;
+}
+
+/* Tooltip styling */
+.tooltip {
+    position: relative;
+    display: inline-block;
+    margin-left: 10px;
+}
+
+.info-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background-color: #bbb;
+    color: #fff;
+    font-size: 12px;
+    cursor: help;
+}
+
+.tooltiptext {
+    visibility: hidden;
+    width: 280px;
+    background-color: #333;
+    color: #fff;
+    text-align: center;
+    border-radius: 6px;
+    padding: 8px;
+    position: absolute;
+    z-index: 1;
+    bottom: 125%;
+    left: 50%;
+    margin-left: -140px;
+    opacity: 0;
+    transition: opacity 0.3s;
+    font-size: 14px;
+    line-height: 1.4;
+}
+
+.tooltip:hover .tooltiptext {
+    visibility: visible;
+    opacity: 1;
+}
+
+/* Encryption warning */
+.encryption-warning {
+    margin-top: 8px;
+    color: #e74c3c;
+    font-size: 14px;
+}
+
+/* Encryption notice on preview page */
+.encryption-notice {
+    display: flex;
+    align-items: center;
+    background-color: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-left: 4px solid #17a2b8;
+    border-radius: 4px;
+    padding: 15px;
+    margin-bottom: 20px;
+}
+
+.encryption-icon {
+    font-size: 24px;
+    margin-right: 15px;
+}
+
+.encryption-message {
+    flex: 1;
+}
+
+.encryption-message strong {
+    display: block;
+    margin-bottom: 5px;
+    color: #17a2b8;
+}
+
+.encryption-message p {
+    margin: 0;
+    color: #6c757d;
+}
+
+/* Encryption error */
+.encryption-error {
+    display: flex;
+    align-items: center;
+    background-color: #fff8f8;
+    border: 1px solid #ffebee;
+    border-left: 4px solid #e74c3c;
+    border-radius: 4px;
+    padding: 15px;
+    margin-bottom: 20px;
+}
+
+.error-icon {
+    font-size: 24px;
+    margin-right: 15px;
+}
+
+.error-message {
+    flex: 1;
+}
+
+.error-message strong {
+    display: block;
+    margin-bottom: 5px;
+    color: #e74c3c;
+}
+
+.error-message p {
+    margin: 0;
+    color: #6c757d;
 } 

@@ -13,29 +13,57 @@
     <link rel="manifest" href="/static/site.webmanifest">
     <link rel="icon" href="/static/favicon/favicon.ico">
 </head>
-<body>
+<body 
+    data-encrypted="{{if .IsEncrypted}}true{{else}}false{{end}}"
+    data-file-url="{{.FileURL}}?dl=true"
+    data-mime-type="{{.MimeType}}"
+    data-filename="{{.Filename}}">
     <a href="/">
         <img src="/static/logo.png" alt="Upload Fish Logo" class="logo">
     </a>
     <h2>File Details</h2>
     
-    {{if .IsPreviewable}}
-    <div class="preview-container">
-        {{if .IsImage}}
-            <img src="{{.FileURL}}?dl=true" alt="{{.Filename}}" />
-        {{else if .IsVideo}}
-            <video controls>
-                <source src="{{.FileURL}}?dl=true" type="{{.MimeType}}">
-                Your browser does not support video playback.
-            </video>
-        {{else if .IsAudio}}
-            <audio controls>
-                <source src="{{.FileURL}}?dl=true" type="{{.MimeType}}">
-                Your browser does not support audio playback.
-            </audio>
+    <div id="encryptionNotice" class="encryption-notice" style="display: none;">
+        <div class="encryption-icon">&#128274;</div>
+        <div class="encryption-message">
+            <strong>This file is encrypted</strong>
+            <p>The decryption key is included in the URL fragment (after the #).<br>
+            Share the complete URL to allow others to decrypt the file.</p>
+        </div>
+    </div>
+
+    <div id="encryptionError" class="encryption-error" style="display: none;">
+        <div class="error-icon">&#9888;</div>
+        <div class="error-message">
+            <strong>Decryption failed</strong>
+            <p>The encryption key may be missing or incorrect. Make sure you have the complete URL including the part after the # symbol.</p>
+        </div>
+    </div>
+    
+    <div id="decryptionProgress" class="progress-container" style="display: none;">
+        <div class="progress">
+            <div class="progress-bar" id="decryptionProgressBar"></div>
+        </div>
+        <div class="progress-text" id="decryptionProgressText">Decrypting...</div>
+    </div>
+    
+    <div id="previewContainer" class="preview-container" {{if .IsEncrypted}}style="display: none;"{{end}}>
+        {{if .IsPreviewable}}
+            {{if .IsImage}}
+                <img id="previewImage" src="{{if not .IsEncrypted}}{{.FileURL}}?dl=true{{end}}" alt="{{.Filename}}" />
+            {{else if .IsVideo}}
+                <video id="previewVideo" controls>
+                    <source id="previewVideoSource" src="{{if not .IsEncrypted}}{{.FileURL}}?dl=true{{end}}" type="{{.MimeType}}">
+                    Your browser does not support video playback.
+                </video>
+            {{else if .IsAudio}}
+                <audio id="previewAudio" controls>
+                    <source id="previewAudioSource" src="{{if not .IsEncrypted}}{{.FileURL}}?dl=true{{end}}" type="{{.MimeType}}">
+                    Your browser does not support audio playback.
+                </audio>
+            {{end}}
         {{end}}
     </div>
-    {{end}}
 
     <div class="file-details">
         <div class="detail-row">
@@ -64,14 +92,21 @@
             <span>{{.ExpiryTimeFormatted}}</span>
         </div>
         {{end}}
+        
+        {{if .IsEncrypted}}
+        <div class="detail-row">
+            <span class="detail-label">Encryption:</span>
+            <span><strong>Encrypted</strong> (client-side)</span>
+        </div>
+        {{end}}
     </div>
     
-    <div class="actions">
-        <a href="{{.FileURL}}?dl=true" class="btn btn-primary">Download File</a>
+    <div class="actions" id="fileActions">
+        <a href="{{.FileURL}}?dl=true" class="btn btn-primary" id="downloadBtn">Download File</a>
         <button class="copy-btn js-enabled" id="copyLinkBtn">Copy Link</button>
         <a href="/" class="btn">Upload Another File</a>
     </div>
-    <div class="tip-text">
+    <div class="tip-text" id="downloadTip">
         <small><em>Tip: right click and save as on 'Download File' to download the file with its original filename.</em></small>
     </div>
     

@@ -171,6 +171,14 @@ func (h *Handler) processUploadedFile(file io.ReadSeeker, handler *multipart.Fil
 	expiryDuration := models.ParseExpiryDuration(expiryValue)
 	expiryTime := time.Now().Add(expiryDuration)
 
+	// Check if the file is encrypted client-side
+	isEncrypted := false
+	encryptedValue := r.FormValue("encrypted")
+	if encryptedValue == "true" {
+		isEncrypted = true
+		LogInfo("File is encrypted client-side", nil)
+	}
+
 	// Create a buffer to store the header of the file
 	buffer := make([]byte, 512)
 	if _, err := file.Read(buffer); err != nil {
@@ -210,13 +218,14 @@ func (h *Handler) processUploadedFile(file io.ReadSeeker, handler *multipart.Fil
 
 	// Create file metadata
 	return &models.File{
-		ID:         fileID,
-		Filename:   sanitizeFilename(handler.Filename),
-		MimeType:   contentType,
-		Size:       int64(len(content)),
-		UploadTime: time.Now(),
-		ExpiryTime: expiryTime,
-		Content:    content,
+		ID:          fileID,
+		Filename:    sanitizeFilename(handler.Filename),
+		MimeType:    contentType,
+		Size:        int64(len(content)),
+		UploadTime:  time.Now(),
+		ExpiryTime:  expiryTime,
+		Content:     content,
+		IsEncrypted: isEncrypted,
 	}, nil
 }
 
@@ -377,6 +386,7 @@ func servePreviewPage(w http.ResponseWriter, r *http.Request, h *Handler, fileMe
 		IsVideo             bool
 		IsAudio             bool
 		CSRFToken           string
+		IsEncrypted         bool
 	}{
 		Filename:            fileMetadata.Filename,
 		MimeType:            fileMetadata.MimeType,
@@ -393,6 +403,7 @@ func servePreviewPage(w http.ResponseWriter, r *http.Request, h *Handler, fileMe
 		IsVideo:             isVideo,
 		IsAudio:             isAudio,
 		CSRFToken:           h.csrfProtection.GenerateToken(),
+		IsEncrypted:         fileMetadata.IsEncrypted,
 	}
 
 	// Serve the preview template

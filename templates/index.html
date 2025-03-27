@@ -27,7 +27,7 @@
     
     <!-- JavaScript Disabled Version (shown by default, hidden when JS is detected) -->
     <div class="js-disabled">
-        <p>You seem to have javascript disabled, here is a simple file uploader.</p>
+        <p>You seem to have javascript disabled, here is a simple file uploader. <strong>Note: Client-side encryption is not available without JavaScript.</strong></p>
         <div class="upload-form">
             <form action="/upload" method="post" enctype="multipart/form-data">
                 <input type="hidden" name="csrf_token" value="{{ .CSRFToken }}">
@@ -58,13 +58,26 @@
             </div>
         </div>
         
-        <div class="form-group">
-            <label for="jsExpiry">File expires after:</label>
-            <select name="expiry" id="jsExpiry">
-                {{range .ExpiryOptions}}
-                <option value="{{.Value}}">{{.Label}}</option>
-                {{end}}
-            </select>
+        <div class="form-options">
+            <div class="form-group">
+                <label for="jsExpiry">File expires after:</label>
+                <select name="expiry" id="jsExpiry">
+                    {{range .ExpiryOptions}}
+                    <option value="{{.Value}}">{{.Label}}</option>
+                    {{end}}
+                </select>
+            </div>
+            
+            <div class="form-group encryption-option">
+                <label for="encryptionEnabled">
+                    <input type="checkbox" id="encryptionEnabled" checked>
+                    <span>Enable client-side encryption</span>
+                </label>
+                <div class="tooltip">
+                    <span class="info-icon">?</span>
+                    <span class="tooltiptext">Files will be encrypted in your browser before upload. The encryption key is only shared in the link fragment (#) and never sent to the server. This means we can never see the contents of the file.</span>
+                </div>
+            </div>
         </div>
         
         <div class="progress-container" id="progressContainer">
@@ -77,6 +90,7 @@
         <form id="uploadForm" action="/upload" method="post" enctype="multipart/form-data" class="hidden-form">
             <input type="file" name="file" id="formFileInput">
             <input type="hidden" name="expiry" id="formExpiryInput">
+            <input type="hidden" name="encrypted" id="formEncryptedInput" value="false">
             <input type="hidden" name="csrf_token" id="formCsrfToken" value="{{ .CSRFToken }}">
         </form>
     </div>
