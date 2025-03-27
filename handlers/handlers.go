@@ -137,7 +137,16 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 // validateCSRF validates the CSRF token and returns true if valid
 func (h *Handler) validateCSRF(w http.ResponseWriter, r *http.Request) bool {
 	csrfToken := r.FormValue("csrf_token")
-	if csrfToken == "" || !h.csrfProtection.ValidateToken(csrfToken) {
+	cookie, err := r.Cookie("csrf_token")
+	if err != nil {
+		LogInfo("Invalid or missing CSRF token", map[string]interface{}{
+			"ip": r.RemoteAddr,
+		})
+		h.renderError(w, "Invalid or missing CSRF token, try refreshing the page.", http.StatusForbidden)
+		return false
+	}
+
+	if csrfToken == "" || !h.csrfProtection.ValidateToken(csrfToken, cookie.Value) {
 		LogInfo("Invalid or missing CSRF token", map[string]interface{}{
 			"ip": r.RemoteAddr,
 		})
@@ -462,7 +471,7 @@ func (h *Handler) ErrorPage(w http.ResponseWriter, r *http.Request) {
 	}{
 		ErrorMessage: errMsg,
 		StatusCode:   statusCode,
-		CSRFToken:    h.csrfProtection.GenerateToken(),
+		CSRFToken:    token,
 	}
 
 	// Set content type and status code
@@ -512,6 +521,10 @@ func (h *Handler) renderError(w http.ResponseWriter, errMsg string, statusCode i
 		"status_code":   statusCode,
 	})
 
+	// Generate new CSRF token for error page
+	token := h.csrfProtection.GenerateToken()
+	h.csrfProtection.SetTokenCookie(w, token)
+
 	// Prepare template data
 	data := struct {
 		ErrorMessage string
@@ -520,7 +533,7 @@ func (h *Handler) renderError(w http.ResponseWriter, errMsg string, statusCode i
 	}{
 		ErrorMessage: errMsg,
 		StatusCode:   statusCode,
-		CSRFToken:    h.csrfProtection.GenerateToken(),
+		CSRFToken:    token,
 	}
 
 	// Set content type and status code

@@ -57,9 +57,14 @@ func (c *CSRFProtection) GenerateToken() string {
 	return token
 }
 
-// ValidateToken checks if a token is valid
-func (c *CSRFProtection) ValidateToken(token string) bool {
-	if token == "" {
+// ValidateToken checks if a token is valid and matches the cookie
+func (c *CSRFProtection) ValidateToken(token string, cookieToken string) bool {
+	if token == "" || cookieToken == "" {
+		return false
+	}
+
+	// First check if tokens match
+	if token != cookieToken {
 		return false
 	}
 
@@ -124,12 +129,24 @@ func (c *CSRFProtection) Middleware(next http.Handler) http.Handler {
 			return
 		}
 
+		// Get cookie token
+		cookie, err := r.Cookie("csrf_token")
+		if err != nil {
+			c.logger.Info("CSRF validation failed - no cookie", map[string]interface{}{
+				"method":      r.Method,
+				"path":        r.URL.Path,
+				"remote_addr": r.RemoteAddr,
+			})
+			http.Error(w, "Invalid or missing CSRF token", http.StatusForbidden)
+			return
+		}
+
 		// Look for token in various places
 		var token string
 
 		// Try URL query parameter first
 		token = r.URL.Query().Get("csrf_token")
-		if token != "" && c.ValidateToken(token) {
+		if token != "" && c.ValidateToken(token, cookie.Value) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -142,7 +159,7 @@ func (c *CSRFProtection) Middleware(next http.Handler) http.Handler {
 			// Regular form data
 			if err := r.ParseForm(); err == nil {
 				token = r.FormValue("csrf_token")
-				if token != "" && c.ValidateToken(token) {
+				if token != "" && c.ValidateToken(token, cookie.Value) {
 					next.ServeHTTP(w, r)
 					return
 				}
@@ -155,7 +172,7 @@ func (c *CSRFProtection) Middleware(next http.Handler) http.Handler {
 				// Check multipart form values for CSRF token
 				if values := r.MultipartForm.Value["csrf_token"]; len(values) > 0 {
 					token = values[0]
-					if token != "" && c.ValidateToken(token) {
+					if token != "" && c.ValidateToken(token, cookie.Value) {
 						next.ServeHTTP(w, r)
 						return
 					}
