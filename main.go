@@ -186,17 +186,22 @@ func securityHeadersMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("X-XSS-Protection", "1; mode=block")
-		w.Header().Set("Referrer-Policy", "same-origin")
+		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
 
-		// More permissive CSP that allows necessary functionality
+		// Strict CSP configuration
 		w.Header().Set("Content-Security-Policy",
-			"default-src 'self'; "+
-				"script-src 'self' 'unsafe-inline' 'unsafe-eval'; "+ // Allow inline scripts for event handlers
-				"img-src 'self' data: blob:; "+ // Allow data: URIs for images
-				"media-src 'self' data: blob:; "+ // Allow data: URIs for media (video/audio)
-				"style-src 'self' 'unsafe-inline'; "+ // Allow inline styles
-				"font-src 'self'; "+
-				"connect-src 'self'")
+			"default-src 'none'; "+
+				"script-src 'self' 'unsafe-inline'; "+ // Required for inline event handlers
+				"style-src 'self' 'unsafe-inline'; "+ // Required for inline styles
+				"img-src 'self' data: blob:; "+ // Allow images and file previews
+				"media-src 'self' blob:; "+ // For audio/video previews
+				"connect-src 'self'; "+ // Only allow API calls to same origin
+				"font-src 'self'; "+ // Only allow self-hosted fonts
+				"frame-ancestors 'none'; "+ // Prevent framing
+				"form-action 'self'; "+ // Only allow forms to submit to same origin
+				"base-uri 'self'; "+ // Restrict base URI
+				"manifest-src 'self'; "+ // For web manifest
+				"upgrade-insecure-requests")
 
 		next.ServeHTTP(w, r)
 	})
