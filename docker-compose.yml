@@ -19,12 +19,6 @@ services:
       # Uncomment and set this if you're behind a reverse proxy
       # - BASE_URL=https://upload.fish
     user: "1000:1000"  # Adjust to match your host user ID if needed
-    healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 5s
     logging:
       driver: "json-file"
       options:

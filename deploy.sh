@@ -13,7 +13,7 @@ fi
 
 # Stop any existing container
 echo "🛑 Stopping existing containers..."
-docker-compose down 2>/dev/null || true
+docker compose down 2>/dev/null || true
 
 # Pull latest changes if this is a git repo
 if [ -d ".git" ]; then
@@ -23,8 +23,8 @@ fi
 
 # Build and start the containers
 echo "🔄 Building and starting containers..."
-docker-compose build --no-cache
-docker-compose up -d
+docker compose build --no-cache
+docker compose up -d
 
 # Check if the container is running
 if [ "$(docker ps -q -f name=uploadfish)" ]; then
