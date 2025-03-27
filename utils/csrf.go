@@ -22,6 +22,12 @@ type Logger interface {
 	Info(message string, fields map[string]interface{})
 }
 
+// TokenPair represents a pair of CSRF tokens
+type TokenPair struct {
+	FormToken   string
+	CookieToken string
+}
+
 // NewCSRFProtection creates a new CSRF protection handler
 func NewCSRFProtection(expiration time.Duration, logger Logger) *CSRFProtection {
 	csrf := &CSRFProtection{
@@ -57,33 +63,56 @@ func (c *CSRFProtection) GenerateToken() string {
 	return token
 }
 
-// ValidateToken checks if a token is valid and matches the cookie
-func (c *CSRFProtection) ValidateToken(token string, cookieToken string) bool {
-	if token == "" || cookieToken == "" {
-		return false
-	}
+// GenerateTokenPair creates a new pair of CSRF tokens
+func (c *CSRFProtection) GenerateTokenPair() TokenPair {
+	// Generate form token
+	formToken := c.GenerateToken()
 
-	// First check if tokens match
-	if token != cookieToken {
+	// Generate cookie token
+	cookieToken := c.GenerateToken()
+
+	// Store both tokens with the same expiry
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	expiry := time.Now().Add(c.expiration)
+	c.tokens[formToken] = expiry
+	c.tokens[cookieToken] = expiry
+
+	return TokenPair{
+		FormToken:   formToken,
+		CookieToken: cookieToken,
+	}
+}
+
+// ValidateToken checks if a token is valid and matches the cookie
+func (c *CSRFProtection) ValidateToken(formToken string, cookieToken string) bool {
+	if formToken == "" || cookieToken == "" {
 		return false
 	}
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	expiry, exists := c.tokens[token]
-	if !exists {
+	// Check if both tokens exist and haven't expired
+	formExpiry, formExists := c.tokens[formToken]
+	cookieExpiry, cookieExists := c.tokens[cookieToken]
+
+	if !formExists || !cookieExists {
 		return false
 	}
 
-	// Check if token has expired
-	if time.Now().After(expiry) {
-		delete(c.tokens, token)
+	// Check if either token has expired
+	now := time.Now()
+	if now.After(formExpiry) || now.After(cookieExpiry) {
+		// Clean up expired tokens
+		delete(c.tokens, formToken)
+		delete(c.tokens, cookieToken)
 		return false
 	}
 
-	// Valid token - remove after use for true one-time use
-	delete(c.tokens, token)
+	// Valid tokens - remove after use for true one-time use
+	delete(c.tokens, formToken)
+	delete(c.tokens, cookieToken)
 	return true
 }
 

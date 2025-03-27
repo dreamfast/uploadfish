@@ -43,9 +43,9 @@ func New(cfg *config.Config, store *storage.Storage, csrfProtection *utils.CSRFP
 
 // Index renders the main upload page
 func (h *Handler) Index(w http.ResponseWriter, r *http.Request) {
-	// Generate CSRF token
-	token := h.csrfProtection.GenerateToken()
-	h.csrfProtection.SetTokenCookie(w, token)
+	// Generate CSRF token pair
+	tokens := h.csrfProtection.GenerateTokenPair()
+	h.csrfProtection.SetTokenCookie(w, tokens.CookieToken)
 
 	// Prepare template data
 	data := struct {
@@ -57,7 +57,7 @@ func (h *Handler) Index(w http.ResponseWriter, r *http.Request) {
 		MaxSizeMB:     h.Config.MaxUploadSize / (1 << 20),
 		AllowedTypes:  getAllowedTypesDisplay(h.Config.AllowedTypes),
 		ExpiryOptions: models.GetExpiryOptions(),
-		CSRFToken:     token,
+		CSRFToken:     tokens.FormToken,
 	}
 
 	w.Header().Set("Content-Type", "text/html")
@@ -447,9 +447,9 @@ func formatFileSize(size int64) string {
 
 // ErrorPage renders the error page
 func (h *Handler) ErrorPage(w http.ResponseWriter, r *http.Request) {
-	// Generate CSRF token for error page
-	token := h.csrfProtection.GenerateToken()
-	h.csrfProtection.SetTokenCookie(w, token)
+	// Generate CSRF token pair for error page
+	tokens := h.csrfProtection.GenerateTokenPair()
+	h.csrfProtection.SetTokenCookie(w, tokens.CookieToken)
 
 	errMsg := r.URL.Query().Get("message")
 	if errMsg == "" {
@@ -471,7 +471,7 @@ func (h *Handler) ErrorPage(w http.ResponseWriter, r *http.Request) {
 	}{
 		ErrorMessage: errMsg,
 		StatusCode:   statusCode,
-		CSRFToken:    token,
+		CSRFToken:    tokens.FormToken,
 	}
 
 	// Set content type and status code
@@ -521,9 +521,9 @@ func (h *Handler) renderError(w http.ResponseWriter, errMsg string, statusCode i
 		"status_code":   statusCode,
 	})
 
-	// Generate new CSRF token for error page
-	token := h.csrfProtection.GenerateToken()
-	h.csrfProtection.SetTokenCookie(w, token)
+	// Generate new CSRF token pair for error page
+	tokens := h.csrfProtection.GenerateTokenPair()
+	h.csrfProtection.SetTokenCookie(w, tokens.CookieToken)
 
 	// Prepare template data
 	data := struct {
@@ -533,7 +533,7 @@ func (h *Handler) renderError(w http.ResponseWriter, errMsg string, statusCode i
 	}{
 		ErrorMessage: errMsg,
 		StatusCode:   statusCode,
-		CSRFToken:    token,
+		CSRFToken:    tokens.FormToken,
 	}
 
 	// Set content type and status code
