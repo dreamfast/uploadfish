@@ -14,91 +14,128 @@
     <link rel="icon" href="/static/favicon/favicon.ico">
 </head>
 <body>
-    <a href="/">
-        <img src="/static/logo.png" alt="Upload Fish Logo" class="logo">
-    </a>
-    
-    <noscript>
-        <style>
-            .js-disabled { display: block !important; }
-            .js-enabled { display: none !important; }
-        </style>
-    </noscript>
-    
-    <!-- JavaScript Disabled Version (shown by default, hidden when JS is detected) -->
-    <div class="js-disabled">
-        <p>You seem to have javascript disabled, here is a simple file uploader. <strong>Note: Client-side encryption is not available without JavaScript.</strong></p>
-        <div class="upload-form">
-            <form action="/upload" method="post" enctype="multipart/form-data">
-                <input type="hidden" name="csrf_token" value="{{ .CSRFToken }}">
-                <div class="form-group">
-                    <label for="file">Select File:</label>
-                    <input type="file" id="file" name="file" required>
-                </div>
-                <div class="form-group">
-                    <label for="expiry">Expiry Time:</label>
-                    <select id="expiry" name="expiry" required>
-                        {{ range .ExpiryOptions }}
-                        <option value="{{ .Value }}">{{ .Label }}</option>
-                        {{ end }}
-                    </select>
-                </div>
-                <button type="submit" class="btn">Upload</button>
-            </form>
-        </div>
+    <!-- Background bubbles container -->
+    <div class="background-bubbles">
+        <div class="bubble-bg bubble-bg-1"></div>
+        <div class="bubble-bg bubble-bg-2"></div>
+        <div class="bubble-bg bubble-bg-3"></div>
+        <div class="bubble-bg bubble-bg-4"></div>
     </div>
     
-    <!-- JavaScript Enabled Version (hidden by default, shown when JS is detected) -->
-    <div class="js-enabled">
-        <div class="drop-zone" id="dropZone">
-            <div class="drop-zone-content">
-                <div class="drop-zone-text">Drag & drop your file here or click to select</div>
-                <button class="upload-btn" id="selectFileBtn">Select File</button>
-                <input type="file" id="fileInput" class="hidden-input">
-            </div>
-        </div>
-        
-        <div class="form-options">
-            <div class="form-group">
-                <label for="jsExpiry">File expires after:</label>
-                <select name="expiry" id="jsExpiry">
-                    {{range .ExpiryOptions}}
-                    <option value="{{.Value}}">{{.Label}}</option>
-                    {{end}}
-                </select>
+    <div class="upload-container">
+        <div class="modal">           
+            <noscript>
+                <style>
+                    .js-disabled { display: block !important; }
+                    .js-enabled { display: none !important; }
+                </style>
+            </noscript>
+            
+            <!-- JavaScript Disabled Version (shown by default, hidden when JS is detected) -->
+            <div class="js-disabled">
+                <div class="modal-header">
+                    <h1>Upload Fish</h1>
+                    <p class="subtitle">File Upload and Sharing</p>
+                </div>
+                
+                <div class="nojs-container">
+                    <div class="modal-logo">
+                        <a href="/">
+                            <img src="/static/logo.png" alt="Upload Fish Logo" class="modal-logo-image">
+                        </a>
+                    </div>
+                    
+                    <div class="nojs-message">
+                        <p>JavaScript is disabled, so here is a simpler upload form.<br><strong>Note: Client-side encryption is not available without JavaScript.</strong></p>
+                    </div>
+                    
+                    <div class="file-size-info">Max file size: {{.MaxSizeMB}} MB</div>
+                    
+                    <div class="nojs-form">
+                        <form action="/upload" method="post" enctype="multipart/form-data">
+                            <input type="hidden" name="csrf_token" value="{{ .CSRFToken }}">
+                            <div class="form-group">
+                                <label for="file">Select File:</label>
+                                <div class="file-input-container">
+                                    <input type="file" id="file" name="file" required>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label for="expiry">Expiration Time:</label>
+                                <select id="expiry" name="expiry" required>
+                                    {{ range .ExpiryOptions }}
+                                    <option value="{{ .Value }}">{{ .Label }}</option>
+                                    {{ end }}
+                                </select>
+                            </div>
+                            <div class="form-actions">
+                                <button type="submit" class="btn btn-upload">Upload</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
             </div>
             
-            <div class="form-group encryption-option">
-                <label for="encryptionEnabled">
-                    <input type="checkbox" id="encryptionEnabled" checked>
-                    <span>Enable client-side encryption</span>
-                </label>
-                <div class="tooltip">
-                    <span class="info-icon">?</span>
-                    <span class="tooltiptext">Files will be encrypted in your browser before upload. The encryption key is only shared in the link fragment (#) and never sent to the server. This means we can never see the contents of the file.</span>
+            <!-- JavaScript Enabled Version (hidden by default, shown when JS is detected) -->
+            <div class="js-enabled">
+                <div class="modal-header">
+                    <h1>Upload Fish</h1>
+                    <p class="subtitle">File Upload and Sharing</p>
                 </div>
+                
+                <div class="drop-zone" id="dropZone">
+                    <div class="drop-zone-content">
+                        <div class="logo-container">
+                            <img src="/static/logo.png" alt="Upload Fish Logo" class="drop-zone-logo">
+                        </div>
+                        <div class="drop-zone-text">Drag & drop your file here</div>
+                        <button class="upload-btn" id="selectFileBtn">Select File</button>
+                        <input type="file" id="fileInput" class="hidden-input">
+                    </div>
+                </div>
+                
+                <div class="file-size-info">Max file size: {{.MaxSizeMB}} MB</div>
+                
+                <div class="form-options">
+                    <div class="file-size-info">Review these options before selecting a file</div>
+                    <div class="option-row">
+                        <div class="form-group encryption-option">
+                            <input type="checkbox" id="encryptionEnabled" checked>
+                            <label for="encryptionEnabled">Encrypt File</label>
+                            <div class="tooltip">
+                                <span class="info-icon">?</span>
+                                <div class="tooltiptext">Files will be encrypted in your browser before upload. The encryption key is only shared in the link fragment (#) and never sent to the server. This means we can never see the contents of the file.</div>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="jsExpiry">Expiration Time</label>
+                            <select name="expiry" id="jsExpiry">
+                                {{range .ExpiryOptions}}
+                                <option value="{{.Value}}">{{.Label}}</option>
+                                {{end}}
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="progress-container" id="progressContainer">
+                    <div class="progress">
+                        <div class="progress-bar" id="progressBar"></div>
+                    </div>
+                    <div class="progress-text" id="progressText">0%</div>
+                </div>
+                
+                <form id="uploadForm" action="/upload" method="post" enctype="multipart/form-data" class="hidden-form">
+                    <input type="file" name="file" id="formFileInput">
+                    <input type="hidden" name="expiry" id="formExpiryInput">
+                    <input type="hidden" name="encrypted" id="formEncryptedInput" value="false">
+                    <input type="hidden" name="csrf_token" id="formCsrfToken" value="{{ .CSRFToken }}">
+                </form>
             </div>
         </div>
         
-        <div class="progress-container" id="progressContainer">
-            <div class="progress">
-                <div class="progress-bar" id="progressBar"></div>
-            </div>
-            <div class="progress-text" id="progressText">0%</div>
-        </div>
-        
-        <form id="uploadForm" action="/upload" method="post" enctype="multipart/form-data" class="hidden-form">
-            <input type="file" name="file" id="formFileInput">
-            <input type="hidden" name="expiry" id="formExpiryInput">
-            <input type="hidden" name="encrypted" id="formEncryptedInput" value="false">
-            <input type="hidden" name="csrf_token" id="formCsrfToken" value="{{ .CSRFToken }}">
-        </form>
+        {{template "footer" .}}
     </div>
-    
-    <div class="info">
-        <p><strong>Max file size:</strong> {{.MaxSizeMB}} MB</p>
-    </div>
-    
-    {{template "footer" .}}
 </body>
 </html> 

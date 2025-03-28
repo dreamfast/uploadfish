@@ -14,15 +14,38 @@
     <script src="/static/js/main.js"></script>
 </head>
 <body>
-    <img src="/static/error.png" alt="Upload Fish Error" class="logo">
-    <h1>Upload Error</h1>
-    <div class="error">
-        <p><small>Status code: {{.StatusCode}}</small></p>
-        <p><strong>Error:</strong> {{.ErrorMessage}}</p>
+    <!-- Background bubbles container -->
+    <div class="background-bubbles">
+        <div class="bubble-bg bubble-bg-1"></div>
+        <div class="bubble-bg bubble-bg-2"></div>
+        <div class="bubble-bg bubble-bg-3"></div>
+        <div class="bubble-bg bubble-bg-4"></div>
     </div>
     
-    <a href="/" class="btn">Upload Another File</a>
-    
-    {{template "footer" .}}
+    <div class="upload-container">
+        <div class="modal">
+            <div class="modal-header">
+                <h1>Upload Error</h1>
+            </div>
+            
+            <div class="error-centered">
+                <div class="error-logo">
+                    <img src="/static/logo.png" alt="Error Fish" class="error-fish-logo">
+                </div>
+                
+                <div class="error-details">
+                    <p class="error-title">Error</p>
+                    <p class="error-message">{{.ErrorMessage}}</p>
+                    <p class="error-status">Status code: {{.StatusCode}}</p>
+                </div>
+                
+                <div class="error-actions">
+                    <a href="/" class="btn">Upload Another File</a>
+                </div>
+            </div>
+        </div>
+        
+        {{template "footer" .}}
+    </div>
 </body>
 </html> 

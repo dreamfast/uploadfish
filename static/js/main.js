@@ -202,27 +202,17 @@ class FileEncryption {
 
 // Common initialization when DOM is loaded
 document.addEventListener('DOMContentLoaded', function () {
-    // Apply JS class to both html and body elements
-    document.documentElement.classList.add('js');
-    document.body.classList.add('js');
+    // Check if JavaScript is enabled and add class to html tag
+    document.documentElement.className = 'js';
 
-    // Explicitly hide/show elements based on JS support
-    const hideElements = document.querySelectorAll('.js-disabled');
-    const showElements = document.querySelectorAll('.js-enabled');
-
-    hideElements.forEach(el => el.style.display = 'none');
-    showElements.forEach(el => el.style.display = 'block');
-
-    // Check if encryption is supported and show warning if not
-    if (!FileEncryption.isEncryptionSupported()) {
-        showEncryptionWarning();
+    // Specific page initializations
+    if (document.querySelector('#dropZone')) {
+        // Initialize the uploader page functionality
+        initializeUploader();
+    } else if (document.body.hasAttribute('data-encrypted')) {
+        // Initialize the preview page functionality
+        initializePreviewPage();
     }
-
-    // Initialize the uploader functionality if we're on the upload page
-    initializeUploader();
-
-    // Initialize the preview page functionality
-    initializePreviewPage();
 });
 
 // Show encryption not supported warning
