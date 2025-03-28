@@ -720,14 +720,12 @@ function initializeUploader() {
         } while (randomIndex === lastPhraseIndex && fishProcessingPhrases.length > 1);
 
         lastPhraseIndex = randomIndex;
-        console.log("New fish phrase index: " + randomIndex);
         return "90% - " + fishProcessingPhrases[randomIndex];
     }
 
     // Get random encryption phrase
     function getRandomEncryptionPhrase() {
         let randomIndex = Math.floor(Math.random() * encryptionPhrases.length);
-        console.log("New encryption phrase index: " + randomIndex);
         return encryptionPhrases[randomIndex];
     }
 
@@ -926,7 +924,6 @@ function initializeUploader() {
             
             // Set up rotation interval for encryption phrases
             phrasesInterval = setInterval(function() {
-                console.log("Encryption phrase rotation fired");
                 updateProgress(null, getRandomEncryptionPhrase());
             }, 5000);
 
@@ -990,73 +987,64 @@ function initializeUploader() {
             
             // Set up progress tracking
             const fileSize = formFileInput.files[0].size;
-            let lastLoaded = 0;
             let uploadComplete = false;
+            let uploadStartTime = Date.now();
+            let lastProgressUpdate = uploadStartTime;
+            let bytesUploaded = 0;
             
-            // Start progress tracking interval
-            const progressTracker = setInterval(() => {
-                if (!uploadComplete) {
-                    // If at 90%, show fish phrases
-                    if (lastLoaded >= fileSize * 0.9) {
+            // Use XMLHttpRequest for accurate progress tracking
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', '/upload', true);
+            xhr.timeout = 3600000; // 1 hour timeout
+            
+            // Set up proper CSRF token
+            const csrfToken = document.getElementById('formCsrfToken').value;
+            if (csrfToken) {
+                xhr.setRequestHeader('X-CSRF-Token', csrfToken);
+            }
+            
+            // Track upload progress accurately
+            xhr.upload.onprogress = function(event) {
+                if (event.lengthComputable) {
+                    bytesUploaded = event.loaded;
+                    const now = Date.now();
+                    
+                    // Only update progress every 200ms to avoid too many UI updates
+                    if (now - lastProgressUpdate > 200) {
+                        const percent = Math.min(Math.round((bytesUploaded / fileSize) * 100), 99);
+                        
+                        // Show fish phrases throughout the entire upload process
                         if (!phrasesInterval) {
-                            console.log("Upload at 90%, showing fish phrase");
-                            updateProgress(90, getRandomFishPhrase());
+                            updateProgress(percent, percent + "% - " + fishProcessingPhrases[Math.floor(Math.random() * fishProcessingPhrases.length)]);
                             
                             // Start rotating phrases every 5 seconds
                             phrasesInterval = setInterval(function() {
-                                console.log("Rotation timer fired");
-                                progressText.textContent = getRandomFishPhrase();
+                                const currentPercent = Math.min(Math.round((bytesUploaded / fileSize) * 100), 99);
+                                progressText.textContent = currentPercent + "% - " + fishProcessingPhrases[Math.floor(Math.random() * fishProcessingPhrases.length)];
                             }, 5000);
+                        } else {
+                            // Just update the percentage number in the existing phrase
+                            const currentText = progressText.textContent;
+                            const newText = percent + "%" + currentText.substring(currentText.indexOf("%") + 1);
+                            progressText.textContent = newText;
                         }
+                        
+                        // Still update the progress bar
+                        progressBar.style.width = percent + '%';
+                        
+                        lastProgressUpdate = now;
                     }
                 }
-            }, 500);
+            };
             
-            try {
-                // Track upload progress using a ReadableStream
-                const reader = formFileInput.files[0].stream().getReader();
-                let receivedLength = 0;
-                
-                // Read the file stream
-                const streamProgress = async () => {
-                    while (true) {
-                        const { done, value } = await reader.read();
-                        
-                        if (done) {
-                            break;
-                        }
-                        
-                        receivedLength += value.length;
-                        lastLoaded = receivedLength;
-                        const percent = Math.min(Math.round((receivedLength / fileSize) * 90), 89);
-                        updateProgress(percent);
-                    }
-                };
-                
-                // Start progress tracking in the background
-                streamProgress().catch(error => {
-                    console.warn("Progress tracking encountered an issue:", error);
-                    // This shouldn't stop the main upload
-                });
-                
-                // Send the actual upload request
-                const response = await fetch('/upload', {
-                    method: 'POST',
-                    body: formData,
-                    signal: signal,
-                    // Include credentials (cookies) for CSRF validation
-                    credentials: 'same-origin'
-                });
-                
-                // Upload is complete at this point
+            // Handle upload completion
+            xhr.onload = function() {
                 uploadComplete = true;
-                clearInterval(progressTracker);
                 
                 // Clear the timeout since request completed
                 clearTimeout(timeoutId);
                 
-                // Handle response
-                if (response.ok) {
+                if (xhr.status >= 200 && xhr.status < 300) {
                     // Success handling
                     updateProgress(100, '100% - Complete!');
                     
@@ -1064,31 +1052,35 @@ function initializeUploader() {
                     setTimeout(() => {
                         // Redirect with encryption key if needed
                         if (encryptionKey) {
-                            const redirectUrl = response.url || '/';
+                            const redirectUrl = xhr.responseURL || '/';
                             window.location.href = redirectUrl + '#' + encryptionKey;
                         } else {
-                            window.location.href = response.url || '/';
+                            window.location.href = xhr.responseURL || '/';
                         }
                     }, 500);
                 } else {
                     // Error handling - parse error from response
-                    const responseText = await response.text();
-                    const errorMessage = parseErrorMessageFromHTML(responseText) || 
-                                        `Upload failed! Server returned status ${response.status}`;
+                    const errorMessage = parseErrorMessageFromHTML(xhr.responseText) || 
+                                      `Upload failed! Server returned status ${xhr.status}`;
                     showError(errorMessage);
                 }
-            } catch (error) {
-                clearInterval(progressTracker);
+            };
+            
+            // Handle network errors
+            xhr.onerror = function() {
                 clearTimeout(timeoutId);
-                
-                if (error.name === 'AbortError') {
-                    // Already handled by the timeout callback
-                    return;
-                }
-                
-                console.error('Fetch error:', error);
+                console.error('XHR error during upload');
                 showError('Network error during upload. Please check your connection and try again.');
-            }
+            };
+            
+            // Handle timeout
+            xhr.ontimeout = function() {
+                console.error('XHR timeout during upload');
+                showError('Upload timed out. Please try with a smaller file or check your connection.');
+            };
+            
+            // Send the form data
+            xhr.send(formData);
             
         } catch (error) {
             console.error('Upload preparation error:', error);
@@ -1148,18 +1140,21 @@ function initializeUploader() {
         if (text) {
             progressText.textContent = text;
         } else {
-            // For regular progress, update with clear message
-            if (percent < 90) {
-                progressText.textContent = percent + '% - Uploading...';
-            } else if (percent >= 90 && percent < 100) {
-                // Start rotating phrases at 90%
-                progressText.textContent = getRandomFishPhrase();
+            // For regular progress, show fish phrases throughout
+            const randomFishPhrase = fishProcessingPhrases[Math.floor(Math.random() * fishProcessingPhrases.length)];
+            
+            if (percent < 100) {
+                // Start rotating phrases immediately
+                progressText.textContent = percent + "% - " + randomFishPhrase;
                 
-                // Start rotating phrases every 5 seconds
-                phrasesInterval = setInterval(function() {
-                    progressText.textContent = getRandomFishPhrase();
-                    console.log("Fish phrase rotated: " + progressText.textContent); // Debug line
-                }, 5000);
+                if (!phrasesInterval) {
+                    // Start rotating phrases every 5 seconds
+                    phrasesInterval = setInterval(function() {
+                        const currentPercent = parseInt(progressBar.style.width) || percent;
+                        const newPhrase = fishProcessingPhrases[Math.floor(Math.random() * fishProcessingPhrases.length)];
+                        progressText.textContent = currentPercent + "% - " + newPhrase;
+                    }, 5000);
+                }
             } else {
                 progressText.textContent = percent + '% - Complete!';
                 
