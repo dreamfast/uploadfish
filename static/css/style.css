@@ -5,12 +5,13 @@ body {
     padding: 0;
     color: #333;
     background: linear-gradient(135deg, #1a6985 0%, #4a9ad5 50%, #83d0e2 100%);
-    height: 100vh;
+    min-height: 100vh;
     display: flex;
     justify-content: center;
     align-items: center;
     position: relative;
-    overflow: hidden;
+    overflow-x: hidden;
+    overflow-y: auto;
 }
 
 /* Background bubbles styling - like the mockup */
@@ -66,6 +67,7 @@ body {
     display: flex;
     flex-direction: column;
     align-items: center;
+    padding: 10px 0;
 }
 
 .modal {
@@ -877,6 +879,9 @@ body.js .js-enabled {
     
     body {
         padding: 10px;
+        height: auto;
+        min-height: 100vh;
+        overflow-y: auto;
     }
     
     .modal {
@@ -962,6 +967,12 @@ body.js .js-enabled {
     
     .drop-zone-logo {
         width: 85px;
+    }
+    
+    .upload-container {
+        width: 95%;
+        padding: 15px 0;
+        margin: 10px auto;
     }
 }
 
@@ -1313,5 +1324,26 @@ select:focus {
     
     .error-message {
         font-size: 15px;
+    }
+}
+
+@media (max-height: 700px) {
+    body {
+        align-items: flex-start;
+        padding-top: 20px;
+        padding-bottom: 20px;
+    }
+    
+    .upload-container {
+        margin-top: 10px;
+        margin-bottom: 10px;
+    }
+    
+    .modal {
+        max-height: none;
+    }
+    
+    .drop-zone {
+        margin: 15px auto;
     }
 } 
