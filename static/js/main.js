@@ -598,6 +598,9 @@ function initializeUploader() {
     const progressContainer = document.getElementById('progressContainer');
     const progressBar = document.getElementById('progressBar');
     const progressText = document.getElementById('progressText');
+    const dropZoneContent = document.querySelector('.drop-zone-content');
+    const dropZoneLogo = document.querySelector('.drop-zone-logo');
+    let phrasesInterval; // For storing the interval that rotates phrases
 
     // Check if encryption is available in this browser
     const isEncryptionSupported = FileEncryption.isEncryptionSupported();
@@ -677,12 +680,15 @@ function initializeUploader() {
         } while (randomIndex === lastPhraseIndex && fishProcessingPhrases.length > 1);
 
         lastPhraseIndex = randomIndex;
+        console.log("New fish phrase index: " + randomIndex);
         return "90% - " + fishProcessingPhrases[randomIndex];
     }
 
     // Get random encryption phrase
     function getRandomEncryptionPhrase() {
-        return encryptionPhrases[Math.floor(Math.random() * encryptionPhrases.length)];
+        let randomIndex = Math.floor(Math.random() * encryptionPhrases.length);
+        console.log("New encryption phrase index: " + randomIndex);
+        return encryptionPhrases[randomIndex];
     }
 
     // Get max file size from the UI
@@ -742,8 +748,55 @@ function initializeUploader() {
 
     // Prepare the upload form
     function prepareUpload(file) {
-        // Show and reset progress bar
+        // Hide any previous error messages
+        const errorContainer = document.getElementById('errorContainer');
+        if (errorContainer) {
+            errorContainer.style.display = 'none';
+        }
+        
+        // Create a separate copy of the logo at the top
+        let uploadingLogo = document.querySelector('.uploading-logo');
+        if (!uploadingLogo && dropZoneLogo) {
+            uploadingLogo = dropZoneLogo.cloneNode(true);
+            uploadingLogo.classList.add('uploading-logo');
+            uploadingLogo.style.position = 'absolute';
+            uploadingLogo.style.top = '50px';
+            uploadingLogo.style.zIndex = '20';
+            uploadingLogo.classList.add('uploading');
+            dropZone.appendChild(uploadingLogo);
+        }
+        
+        // Hide the select file button
+        if (selectFileBtn) {
+            selectFileBtn.style.display = 'none';
+        }
+        
+        // Hide drop zone content
+        if (dropZoneContent) {
+            dropZoneContent.style.opacity = '0';
+            dropZoneContent.style.pointerEvents = 'none';
+            dropZoneContent.style.position = 'absolute';
+        }
+        
+        // Show and position progress container inside drop zone
         progressContainer.style.display = 'block';
+        if (!dropZone.contains(progressContainer)) {
+            dropZone.appendChild(progressContainer);
+        }
+        
+        // Add uploading class to dropzone
+        dropZone.classList.add('uploading');
+        
+        // Add uploading-active class to body for bubble animation
+        document.body.classList.add('uploading-active');
+        
+        // Hide form options during upload
+        const formOptions = document.querySelector('.form-options');
+        if (formOptions) {
+            formOptions.style.display = 'none';
+        }
+
+        // Reset progress bar
         progressBar.style.backgroundColor = '#4CAF50';
         progressBar.style.width = '0%';
         progressText.textContent = '0%';
@@ -775,10 +828,50 @@ function initializeUploader() {
                 // This ensures any unhandled errors are properly shown to the user
                 console.error('Upload process failed:', error);
                 showError('Upload failed: ' + error.message);
+                resetUploadUI();
             });
         } else {
             // If not encrypting, proceed with normal upload
             processRegularUpload(file);
+        }
+    }
+
+    // Reset UI after error or completion
+    function resetUploadUI() {
+        // Stop the phrase rotation interval
+        if (phrasesInterval) {
+            clearInterval(phrasesInterval);
+            phrasesInterval = null;
+        }
+        
+        // Remove uploading class from dropzone
+        dropZone.classList.remove('uploading');
+        
+        // Remove the cloned logo if it exists
+        const uploadingLogo = document.querySelector('.uploading-logo');
+        if (uploadingLogo) {
+            dropZone.removeChild(uploadingLogo);
+        }
+        
+        // Show the select file button again
+        if (selectFileBtn) {
+            selectFileBtn.style.display = '';
+        }
+        
+        // Remove uploading-active class from body to stop bubble animation
+        document.body.classList.remove('uploading-active');
+        
+        // Show drop zone content again
+        if (dropZoneContent) {
+            dropZoneContent.style.opacity = '1';
+            dropZoneContent.style.pointerEvents = 'auto';
+            dropZoneContent.style.position = '';
+        }
+        
+        // Show form options again
+        const formOptions = document.querySelector('.form-options');
+        if (formOptions) {
+            formOptions.style.display = 'block';
         }
     }
 
@@ -788,11 +881,23 @@ function initializeUploader() {
             // Generate a random encryption key
             const encryptionKey = await FileEncryption.generateKey();
 
-            // Update progress
-            updateProgress(40, "Encrypting your file...");
+            // Start rotating encryption phrases during the encryption process
+            updateProgress(20, getRandomEncryptionPhrase());
+            
+            // Set up rotation interval for encryption phrases
+            phrasesInterval = setInterval(function() {
+                console.log("Encryption phrase rotation fired");
+                updateProgress(null, getRandomEncryptionPhrase());
+            }, 5000);
 
             // Encrypt the file
             const encryptedBlob = await FileEncryption.encryptFile(file, encryptionKey);
+
+            // Clear the encryption phrases interval
+            if (phrasesInterval) {
+                clearInterval(phrasesInterval);
+                phrasesInterval = null;
+            }
 
             // Update progress
             updateProgress(70, "File encrypted! Preparing upload...");
@@ -847,7 +952,14 @@ function initializeUploader() {
 
         // When upload is complete but before server processing is done
         xhr.upload.onload = () => {
+            console.log("Upload completed, showing fish phrase");
             updateProgress(90, getRandomFishPhrase());
+            
+            // Ensure the rotation happens
+            phrasesInterval = setInterval(function() {
+                console.log("Rotation timer fired");
+                progressText.textContent = getRandomFishPhrase();
+            }, 5000);
         };
 
         // Handle response
@@ -885,9 +997,26 @@ function initializeUploader() {
 
     // Update progress bar
     function updateProgress(percent, text) {
+        // Hide any error message when showing progress
+        const errorContainer = document.getElementById('errorContainer');
+        if (errorContainer) {
+            errorContainer.style.display = 'none';
+        }
+
         // Apply transition for smoother animation
         progressBar.style.transition = 'width 0.3s ease-in-out';
-        progressBar.style.width = percent + '%';
+        
+        // Update progress bar width if percent is provided
+        if (percent !== null) {
+            progressBar.style.width = percent + '%';
+        }
+
+        // Clear any existing phrase rotation interval if we're setting new text
+        // but not during encryption rotation
+        if (text && !text.includes("Encrypting") && phrasesInterval) {
+            clearInterval(phrasesInterval);
+            phrasesInterval = null;
+        }
 
         // Update text with custom message or percentage
         if (text) {
@@ -896,10 +1025,23 @@ function initializeUploader() {
             // For regular progress, update with clear message
             if (percent < 90) {
                 progressText.textContent = percent + '% - Uploading...';
-            } else if (percent === 90) {
+            } else if (percent >= 90 && percent < 100) {
+                // Start rotating phrases at 90%
                 progressText.textContent = getRandomFishPhrase();
+                
+                // Start rotating phrases every 5 seconds
+                phrasesInterval = setInterval(function() {
+                    progressText.textContent = getRandomFishPhrase();
+                    console.log("Fish phrase rotated: " + progressText.textContent); // Debug line
+                }, 5000);
             } else {
                 progressText.textContent = percent + '% - Complete!';
+                
+                // Stop phrase rotation at 100%
+                if (phrasesInterval) {
+                    clearInterval(phrasesInterval);
+                    phrasesInterval = null;
+                }
             }
         }
 
@@ -911,6 +1053,9 @@ function initializeUploader() {
 
     // Handle redirect after successful upload
     function redirect(xhr, encryptionKey = null) {
+        // Reset UI before redirecting 
+        resetUploadUI();
+        
         let location = xhr.getResponseHeader('Location') || xhr.responseURL;
 
         // If we have an encryption key, append it as a URL fragment
@@ -927,16 +1072,36 @@ function initializeUploader() {
 
     // Handle upload errors
     function handleUploadError(xhr) {
-        progressBar.style.backgroundColor = '#e74c3c';
-        progressText.textContent = parseErrorMessage(xhr) || 'Upload failed! Server returned status ' + xhr.status;
+        const errorMessage = parseErrorMessage(xhr) || 'Upload failed! Server returned status ' + xhr.status;
+        showError(errorMessage);
     }
 
     // Show error message in progress area
     function showError(message) {
-        progressContainer.style.display = 'block';
-        progressBar.style.width = '100%';
-        progressBar.style.backgroundColor = '#e74c3c';
-        progressText.textContent = 'Error: ' + message;
+        // First reset the UI to show the original state
+        resetUploadUI();
+        
+        // Then show the error below the drop zone
+        const errorContainer = document.getElementById('errorContainer');
+        if (errorContainer) {
+            // Use existing error container if it exists
+            errorContainer.textContent = 'Error: ' + message;
+            errorContainer.style.display = 'block';
+        } else {
+            // Create a new error container if it doesn't exist
+            const newErrorContainer = document.createElement('div');
+            newErrorContainer.id = 'errorContainer';
+            newErrorContainer.className = 'error-message';
+            newErrorContainer.textContent = 'Error: ' + message;
+            newErrorContainer.style.cssText = 'display: block; margin: 15px auto; padding: 10px; background-color: #ffebee; border-left: 4px solid #e74c3c; border-radius: 4px; color: #e74c3c; text-align: left; max-width: 90%;';
+            
+            // Insert after the drop zone
+            const parentElement = dropZone.parentNode;
+            parentElement.insertBefore(newErrorContainer, dropZone.nextSibling);
+        }
+        
+        // Hide the progress container
+        progressContainer.style.display = 'none';
     }
 
     // Try to extract error message from HTML response

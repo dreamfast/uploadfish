@@ -30,6 +30,47 @@ body {
     position: absolute;
     border-radius: 50%;
     background-color: rgba(255, 255, 255, 0.15);
+    transition: transform 0.5s ease, background-color 0.5s ease;
+}
+
+/* Bubble animations during upload */
+@keyframes bubble-pulse-move {
+    0% { 
+        transform: scale(1) translate(0, 0); 
+        background-color: rgba(255, 255, 255, 0.15); 
+    }
+    25% { 
+        transform: scale(1.05) translate(10px, -10px); 
+        background-color: rgba(255, 255, 255, 0.2); 
+    }
+    50% { 
+        transform: scale(1.1) translate(0, -15px); 
+        background-color: rgba(255, 255, 255, 0.25); 
+    }
+    75% { 
+        transform: scale(1.05) translate(-10px, -10px); 
+        background-color: rgba(255, 255, 255, 0.2); 
+    }
+    100% { 
+        transform: scale(1) translate(0, 0); 
+        background-color: rgba(255, 255, 255, 0.15); 
+    }
+}
+
+.uploading-active .bubble-bg-1 {
+    animation: bubble-pulse-move 8s ease infinite;
+}
+
+.uploading-active .bubble-bg-2 {
+    animation: bubble-pulse-move 9s ease infinite 0.5s;
+}
+
+.uploading-active .bubble-bg-3 {
+    animation: bubble-pulse-move 7s ease infinite 1s;
+}
+
+.uploading-active .bubble-bg-4 {
+    animation: bubble-pulse-move 10s ease infinite 1.5s;
 }
 
 .bubble-bg-1 {
@@ -278,35 +319,86 @@ a:hover {
 }
 
 .progress-container {
-    margin: 20px;
     display: none;
+    width: 80%;
+    max-width: 250px;
+    padding: 0;
+    box-sizing: border-box;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 10;
 }
 
 .progress {
-    height: 20px;
-    width: 100%;
-    background-color: rgba(245, 245, 245, 0.7);
+    height: 10px;
+    background-color: rgba(245, 245, 245, 0.8);
     border-radius: 10px;
-    overflow: hidden;
-    margin-bottom: 10px;
     box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1);
+    overflow: hidden;
+    position: relative;
 }
 
 .progress-bar {
-    height: 100%;
-    background-color: #1a6985;
     width: 0;
+    height: 100%;
+    background-color: #4CAF50;
     border-radius: 10px;
-    transition: width 0.3s ease-in-out, background-color 0.3s ease;
-    box-shadow: 0 1px 1px rgba(0, 0, 0, 0.05);
+    transition: width 0.3s ease;
 }
 
 .progress-text {
-    font-size: 14px;
     text-align: center;
-    margin-top: 5px;
+    margin-top: 12px;
     font-weight: bold;
     color: #1a6985;
+    font-size: 14px;
+    transition: color 0.3s ease;
+    animation: text-fade 2s ease infinite;
+}
+
+.drop-zone.uploading {
+    border-style: solid;
+    border-color: rgba(26, 105, 133, 0.6);
+    background-color: rgba(255, 255, 255, 0.9);
+    cursor: default;
+    box-shadow: 0 15px 30px rgba(0, 0, 0, 0.15);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    position: relative;
+    padding: 20px;
+}
+
+.drop-zone.uploading .drop-zone-content {
+    opacity: 0;
+    pointer-events: none;
+    position: absolute;
+}
+
+.drop-zone.uploading .drop-zone-logo {
+    opacity: 1;
+    pointer-events: none;
+    position: absolute;
+    top: 50px;
+    z-index: 20;
+}
+
+.drop-zone.uploading .select-file-btn {
+    display: none;
+}
+
+/* Animation for text changing during phrase rotation */
+@keyframes text-fade {
+    0% { opacity: 0.7; }
+    50% { opacity: 1; }
+    100% { opacity: 0.7; }
+}
+
+.uploading-active .progress-text {
+    animation: text-fade 2s ease infinite;
 }
 
 .drop-zone {
@@ -319,22 +411,9 @@ a:hover {
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: background-color 0.3s;
+    transition: all 0.3s;
     cursor: pointer;
     box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1);
-}
-
-.drop-zone-content {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
-    width: 100%;
-    height: 100%;
-    padding: 20px;
-    box-sizing: border-box;
-    text-align: center;
 }
 
 .drop-zone.highlight {
@@ -531,16 +610,44 @@ body.js .js-enabled {
 
 /* Drop zone logo styling */
 .logo-container {
-    margin: 0 auto;
-    display: block;
-    animation: gentle-float 3s ease-in-out infinite;
-    position: relative;
+    margin-bottom: 20px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
 }
 
 .drop-zone-logo {
-    width: 100px;
+    width: 120px;
     height: auto;
-    filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.2));
+    transition: transform 0.3s ease;
+}
+
+/* Fish logo animation during upload */
+@keyframes fish-swimming {
+    0% { 
+        transform: translateX(0) rotate(0deg) scale(1); 
+        filter: drop-shadow(0 3px 5px rgba(0, 0, 0, 0.2));
+    }
+    25% { 
+        transform: translateX(10px) rotate(5deg) scale(1.05); 
+        filter: drop-shadow(3px 5px 8px rgba(0, 0, 0, 0.25));
+    }
+    50% { 
+        transform: translateX(0) rotate(-2deg) scale(1.1); 
+        filter: drop-shadow(0 6px 10px rgba(0, 0, 0, 0.3));
+    }
+    75% { 
+        transform: translateX(-10px) rotate(-5deg) scale(1.05); 
+        filter: drop-shadow(-3px 5px 8px rgba(0, 0, 0, 0.25));
+    }
+    100% { 
+        transform: translateX(0) rotate(0deg) scale(1); 
+        filter: drop-shadow(0 3px 5px rgba(0, 0, 0, 0.2));
+    }
+}
+
+.drop-zone-logo.uploading {
+    animation: fish-swimming 4s ease-in-out infinite;
 }
 
 /* Modal logo link styling - ensure it works on all pages */
@@ -971,32 +1078,37 @@ body.js .js-enabled {
 @media (max-width: 480px) {
     /* Simplify drop zone for mobile */
     .drop-zone {
-        width: 180px;
-        height: auto;
-        min-height: 180px;
-        padding: 15px 0;
+        width: 220px;
+        height: 220px;
         margin: 15px auto;
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-        align-items: center;
     }
     
-    /* Make upload button more prominent and mobile-friendly */
-    .upload-btn {
-        min-width: 140px;
-        white-space: nowrap;
-        padding: 12px 25px;
-        font-size: 16px;
-        margin-top: 10px;
-        border-radius: 25px;
+    /* Adjustments for uploading state on mobile */
+    .drop-zone.uploading {
+        width: 220px;
+        height: 220px;
+        border-width: 2px;
     }
     
-    /* Center fish icon for mobile */
-    .drop-zone-logo {
-        width: 80px;
-        display: block;
-        margin: 5px auto 15px;
+    /* Progress container on mobile */
+    .progress-container {
+        width: 70%;
+        max-width: 180px;
+    }
+    
+    .progress {
+        height: 8px;
+    }
+    
+    .progress-text {
+        font-size: 12px;
+        margin-top: 8px;
+    }
+    
+    /* Mobile logo during upload */
+    .drop-zone.uploading .drop-zone-logo {
+        width: 65px;
+        margin-bottom: 10px;
     }
     
     /* Make file size info more visible */
@@ -1006,163 +1118,6 @@ body.js .js-enabled {
         padding: 5px 10px;
         border-radius: 15px;
         margin: 8px auto;
-    }
-    
-    /* Files details page buttons */
-    .actions {
-        flex-direction: column;
-        gap: 15px;
-        padding: 0 20px;
-        margin: 20px 0;
-        width: 95%;
-      }
-      
-      .actions .btn, 
-      .actions .copy-btn {
-        width: 95%;
-        max-width: 95%;
-        box-sizing: border-box;
-        margin: 0;
-        padding: 14px 20px;
-        font-size: 16px;
-        border-radius: 8px;
-      }
-    
-    .tip-text {
-        padding: 0 20px;
-        font-size: 13px;
-        line-height: 1.4;
-    }
-    
-    /* Preview container adjustments */
-    .preview-container {
-        margin: 15px 10px;
-    }
-    
-    .preview-container img,
-    .preview-container video, 
-    .preview-container audio {
-        max-height: 300px;
-    }
-    
-    /* Detail rows for mobile */
-    .detail-row {
-        flex-direction: column;
-        align-items: flex-start;
-        padding-bottom: 12px;
-    }
-    
-    .detail-label {
-        margin-bottom: 5px;
-    }
-    
-    /* Non-JS styles for very small screens */
-    .nojs-message {
-        font-size: 13px;
-        padding: 8px;
-    }
-    
-    .btn-upload {
-        width: 100%;
-    }
-    
-    /* Modal header adjustments */
-    .modal-header {
-        padding: 10px 15px;
-    }
-    
-    h1 {
-        font-size: 28px;
-        letter-spacing: 0.5px;
-    }
-    
-    h1::after {
-        width: 60px;
-        height: 2px;
-        bottom: -6px;
-    }
-    
-    /* Encryption notice adjustment */
-    .encryption-notice,
-    .encryption-error {
-        padding: 10px;
-        margin: 15px 10px;
-    }
-    
-    .encryption-icon,
-    .error-icon {
-        font-size: 20px;
-        margin-right: 10px;
-    }
-    
-    .subtitle {
-        font-size: 14px;
-        margin: 8px 0 5px;
-    }
-    
-    .drop-zone-content {
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-        align-items: center;
-    }
-    
-    .logo-container {
-        margin: 5px auto 15px;
-    }
-    
-    .drop-zone-text {
-        width: 90%;
-        text-align: center;
-        margin: 5px auto 15px;
-    }
-    
-    .modal-logo-image {
-        width: 110px;
-    }
-    
-    .drop-zone-logo {
-        width: 70px;
-    }
-    
-    /* Better footer handling on very small screens */
-    .footer-container {
-        padding: 8px 5px;
-        font-size: 10px;
-        width: 100%;
-        box-sizing: border-box;
-        margin: 0 auto;
-    }
-    
-    .footer-separator {
-        margin: 0 3px;
-    }
-    
-    /* Fix the Select File button */
-    .upload-btn {
-        min-width: 120px;
-        white-space: nowrap;
-        padding: 10px 25px;
-        font-size: 14px;
-    }
-    
-    /* Improve spacing for the fish logo and button */
-    .drop-zone {
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-        height: auto;
-        min-height: 180px;
-        padding: 15px 0;
-    }
-    
-    .logo-container {
-        margin: 5px auto 15px;
-    }
-    
-    /* Hide drag and drop completely */
-    .drop-zone-text {
-        display: none;
     }
 }
 
@@ -1391,5 +1346,58 @@ select:focus {
     
     .drop-zone {
         margin: 15px auto;
+    }
+}
+
+.uploading-logo {
+    width: 100px;
+    height: auto;
+    position: absolute;
+    top: 50px;
+    z-index: 20;
+    animation: fish-swimming 4s ease-in-out infinite;
+}
+
+@media (max-width: 480px) {
+    .uploading-logo {
+        width: 80px;
+        top: 30px;
+    }
+}
+
+/* Hide form options during upload */
+.drop-zone.uploading ~ .form-options {
+    display: none;
+}
+
+.drop-zone-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+}
+
+/* Error message below drop zone */
+.error-message {
+    display: none;
+    margin: 15px auto;
+    padding: 12px 15px;
+    background-color: #ffebee;
+    border-left: 4px solid #e74c3c;
+    border-radius: 4px;
+    color: #e74c3c;
+    text-align: left;
+    font-size: 14px;
+    font-weight: 500;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
+    max-width: 90%;
+}
+
+@media (max-width: 480px) {
+    .error-message {
+        font-size: 13px;
+        padding: 10px;
+        margin: 10px auto;
     }
 } 
