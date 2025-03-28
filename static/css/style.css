@@ -488,6 +488,8 @@ body.js .js-enabled {
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
     border-radius: 0;
+    width: 100%;
+    flex-wrap: wrap;
 }
 
 .footer-container a {
@@ -495,6 +497,7 @@ body.js .js-enabled {
     text-decoration: none;
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
     font-weight: normal;
+    padding: 5px;
 }
 
 .footer-container a:hover {
@@ -867,10 +870,15 @@ body.js .js-enabled {
         -ms-overflow-style: none;
         scrollbar-width: none;
         flex-direction: row;
-        flex-wrap: nowrap;
-        padding: 8px 0;
+        flex-wrap: wrap;
+        padding: 8px 5px;
+        gap: 5px;
         background-color: transparent;
         box-shadow: none;
+        width: 100%;
+        justify-content: center;
+        box-sizing: border-box;
+        margin: 10px auto 5px;
     }
     
     .footer-container::-webkit-scrollbar {
@@ -908,6 +916,17 @@ body.js .js-enabled {
         margin: 20px auto;
     }
     
+    /* Hide drag and drop text on mobile */
+    .drop-zone-text {
+        display: none;
+    }
+    
+    /* Ensure the Select File button text doesn't wrap */
+    .upload-btn {
+        white-space: nowrap;
+        min-width: 120px;
+    }
+    
     .option-row {
         flex-direction: column;
         align-items: flex-start;
@@ -930,43 +949,16 @@ body.js .js-enabled {
         min-width: 120px;
     }
     
-    /* Non-JS styles for smaller screens */
-    .nojs-container {
-        padding: 15px 10px;
-    }
-    
-    .nojs-form {
-        padding: 15px;
-        margin: 10px 5px;
-    }
-    
-    h1 {
-        font-size: 32px;
-    }
-    
-    .subtitle {
-        font-size: 15px;
-        margin: 10px 0 5px;
-    }
-    
-    .drop-zone-content {
-        text-align: center;
-    }
-    
+    /* Adjust fish graphic to center better */
     .logo-container {
-        margin-bottom: 10px;
-    }
-    
-    .drop-zone-text {
-        margin: 10px 0 20px;
-    }
-    
-    .modal-logo-image {
-        width: 130px;
+        margin: 10px auto;
+        display: block;
     }
     
     .drop-zone-logo {
         width: 85px;
+        margin: 0 auto;
+        display: block;
     }
     
     .upload-container {
@@ -977,14 +969,43 @@ body.js .js-enabled {
 }
 
 @media (max-width: 480px) {
+    /* Simplify drop zone for mobile */
     .drop-zone {
         width: 180px;
-        height: 180px;
+        height: auto;
+        min-height: 180px;
+        padding: 15px 0;
+        margin: 15px auto;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
     }
     
+    /* Make upload button more prominent and mobile-friendly */
     .upload-btn {
-        font-size: 14px;
-        padding: 8px 20px;
+        min-width: 140px;
+        white-space: nowrap;
+        padding: 12px 25px;
+        font-size: 16px;
+        margin-top: 10px;
+        border-radius: 25px;
+    }
+    
+    /* Center fish icon for mobile */
+    .drop-zone-logo {
+        width: 80px;
+        display: block;
+        margin: 5px auto 15px;
+    }
+    
+    /* Make file size info more visible */
+    .file-size-info {
+        font-size: 11px;
+        background-color: rgba(255, 255, 255, 0.6);
+        padding: 5px 10px;
+        border-radius: 15px;
+        margin: 8px auto;
     }
     
     /* Files details page buttons */
@@ -1087,8 +1108,7 @@ body.js .js-enabled {
     }
     
     .logo-container {
-        margin-bottom: 5px;
-        margin-top: -10px;
+        margin: 5px auto 15px;
     }
     
     .drop-zone-text {
@@ -1105,18 +1125,44 @@ body.js .js-enabled {
         width: 70px;
     }
     
+    /* Better footer handling on very small screens */
     .footer-container {
-        flex-direction: row;
-        flex-wrap: nowrap;
-        white-space: nowrap;
-        overflow-x: auto;
-        padding: 8px 0;
-        background-color: transparent;
-        box-shadow: none;
+        padding: 8px 5px;
+        font-size: 10px;
+        width: 100%;
+        box-sizing: border-box;
+        margin: 0 auto;
     }
     
     .footer-separator {
-        display: inline-block;
+        margin: 0 3px;
+    }
+    
+    /* Fix the Select File button */
+    .upload-btn {
+        min-width: 120px;
+        white-space: nowrap;
+        padding: 10px 25px;
+        font-size: 14px;
+    }
+    
+    /* Improve spacing for the fish logo and button */
+    .drop-zone {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        height: auto;
+        min-height: 180px;
+        padding: 15px 0;
+    }
+    
+    .logo-container {
+        margin: 5px auto 15px;
+    }
+    
+    /* Hide drag and drop completely */
+    .drop-zone-text {
+        display: none;
     }
 }
 
