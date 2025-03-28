@@ -80,7 +80,7 @@ func main() {
 	r.Use(middleware.RealIP)
 	r.Use(loggingMiddleware) // Our structured logging middleware
 	r.Use(middleware.Recoverer)
-	r.Use(middleware.Timeout(60 * time.Second))
+	r.Use(middleware.Timeout(3600 * time.Second))
 
 	// Add CORS middleware
 	r.Use(cors.Handler(cors.Options{
@@ -140,6 +140,10 @@ func main() {
 	server := &http.Server{
 		Addr:    addr,
 		Handler: r,
+		// Configure server timeouts for very large file uploads
+		ReadTimeout:  60 * time.Minute,  // 1 hour for read operations
+		WriteTimeout: 60 * time.Minute,  // 1 hour for write operations
+		IdleTimeout:  120 * time.Second, // 2 minutes for idle connections
 	}
 
 	// Handle graceful shutdown

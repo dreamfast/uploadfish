@@ -351,6 +351,29 @@ function hideDownloadOptions() {
     if (downloadTip) downloadTip.style.display = 'none';
 }
 
+// Hide decryption progress display
+function hideDecryptionProgress() {
+    const progressContainer = document.getElementById('decryptionProgress');
+    if (progressContainer) {
+        progressContainer.style.display = 'none';
+        progressContainer.classList.remove('displayed');
+    }
+}
+
+// Show decryption progress 
+function showDecryptionProgress(message) {
+    const progressContainer = document.getElementById('decryptionProgress');
+    const progressText = document.getElementById('decryptionProgressText');
+    
+    if (progressContainer && progressText) {
+        if (message) {
+            progressText.textContent = message;
+        }
+        progressContainer.style.display = 'block';
+        progressContainer.classList.add('displayed');
+    }
+}
+
 // Handle direct download of encrypted file
 async function handleEncryptedDownload(key, fileURL, mimeType, filename) {
     try {
@@ -359,12 +382,20 @@ async function handleEncryptedDownload(key, fileURL, mimeType, filename) {
             throw new Error('Invalid encryption key format');
         }
 
+        // Hide any error message
+        const errorContainer = document.getElementById('encryptionError');
+        if (errorContainer) {
+            errorContainer.style.display = 'none';
+        }
 
-        // Show decryption progress
-        const progressContainer = document.getElementById('decryptionProgress');
-        const progressText = document.getElementById('decryptionProgressText');
-        progressContainer.style.display = 'block';
-        progressText.textContent = 'Preparing download...';
+        // Set initial progress bar appearance
+        const progressBar = document.getElementById('decryptionProgressBar');
+        if (progressBar) {
+            progressBar.style.width = '100%';
+        }
+        
+        // Show progress with initial message
+        showDecryptionProgress('Preparing download...');
 
         // Flag to track if we should try full download
         let shouldTryFullDownload = false;
@@ -372,7 +403,7 @@ async function handleEncryptedDownload(key, fileURL, mimeType, filename) {
         // Try the full download directly for fresh uploads
         // The URL fragment (key) in the address bar indicates this is likely a fresh upload
         if (window.location.hash && window.location.hash.substring(1) === key) {
-            progressText.textContent = 'Downloading file...';
+            showDecryptionProgress('Downloading file...');
             await proceedWithEncryptedDownload(key, fileURL, mimeType, filename);
             return;
         }
@@ -418,7 +449,7 @@ async function handleEncryptedDownload(key, fileURL, mimeType, filename) {
                     await FileEncryption.decryptFile(sampleData, key, mimeType);
                     
                     // If we get here, decryption succeeded, so the key is valid
-                    progressText.textContent = 'Key validated, downloading file...';
+                    showDecryptionProgress('Key validated, downloading file...');
                     
                     // Proceed with full file download
                     await proceedWithEncryptedDownload(key, fileURL, mimeType, filename);
@@ -450,7 +481,7 @@ async function handleEncryptedDownload(key, fileURL, mimeType, filename) {
         // If we should try full download (only if range request wasn't supported or failed completely)
         if (shouldTryFullDownload) {
             // Proceed with downloading the full file
-            progressText.textContent = 'Downloading file...';
+            showDecryptionProgress('Downloading file...');
             await proceedWithEncryptedDownload(key, fileURL, mimeType, filename);
         } else {
             // If we got here without shouldTryFullDownload being true, something unusual happened
@@ -458,9 +489,17 @@ async function handleEncryptedDownload(key, fileURL, mimeType, filename) {
         }
     } catch (error) {
         console.error('Download preparation failed:', error);
-        document.getElementById('decryptionProgress').style.display = 'none';
-        document.getElementById('encryptionError').style.display = 'block';
-        document.getElementById('encryptionError').textContent = error.message || 'Failed to prepare download';
+        
+        // Clear progress display and show error
+        hideDecryptionProgress();
+        
+        // Show error message
+        const errorContainer = document.getElementById('encryptionError');
+        if (errorContainer) {
+            errorContainer.style.display = 'block';
+            errorContainer.textContent = error.message || 'Failed to prepare download';
+        }
+        
         hideDownloadOptions();
     }
 }
@@ -469,11 +508,7 @@ async function handleEncryptedDownload(key, fileURL, mimeType, filename) {
 async function proceedWithEncryptedDownload(key, fileURL, mimeType, filename) {
     try {
         // Show decryption progress
-        const progressContainer = document.getElementById('decryptionProgress');
-        const progressText = document.getElementById('decryptionProgressText');
-        progressContainer.style.display = 'block';
-        progressText.textContent = 'Downloading file...';
-
+        showDecryptionProgress('Downloading file...');
 
         // Fetch the encrypted file
         const response = await fetch(fileURL, {
@@ -486,8 +521,6 @@ async function proceedWithEncryptedDownload(key, fileURL, mimeType, filename) {
             throw new Error('Failed to fetch file');
         }
 
-        // Log response details
-
         // Get the encrypted data
         const encryptedData = await response.arrayBuffer();
 
@@ -497,17 +530,14 @@ async function proceedWithEncryptedDownload(key, fileURL, mimeType, filename) {
             throw new Error('Downloaded data appears to be invalid (too small)');
         }
 
-        // Log first few bytes for debugging
-        const firstBytes = new Uint8Array(encryptedData.slice(0, 16));
-
-        progressText.textContent = 'Decrypting...';
+        showDecryptionProgress('Decrypting...');
 
         try {
             // Decrypt the file
             const decryptedBlob = await FileEncryption.decryptFile(encryptedData, key, mimeType);
 
             // Trigger download
-            progressText.textContent = 'Download starting...';
+            showDecryptionProgress('Download starting...');
 
             const a = document.createElement('a');
             a.href = URL.createObjectURL(decryptedBlob);
@@ -518,20 +548,30 @@ async function proceedWithEncryptedDownload(key, fileURL, mimeType, filename) {
 
             // Hide progress after a short delay
             setTimeout(() => {
-                progressContainer.style.display = 'none';
-            }, 1000);
+                hideDecryptionProgress();
+            }, 1500);
         } catch (decryptError) {
             console.error('Decryption failed:', decryptError);
-            progressContainer.style.display = 'none';
-            document.getElementById('encryptionError').style.display = 'block';
-            document.getElementById('encryptionError').textContent = 'Decryption failed: ' + decryptError.message;
+            hideDecryptionProgress();
+            
+            const errorContainer = document.getElementById('encryptionError');
+            if (errorContainer) {
+                errorContainer.style.display = 'block';
+                errorContainer.textContent = 'Decryption failed: ' + decryptError.message;
+            }
+            
             hideDownloadOptions();
         }
     } catch (error) {
         console.error('Download failed:', error);
-        document.getElementById('decryptionProgress').style.display = 'none';
-        document.getElementById('encryptionError').style.display = 'block';
-        document.getElementById('encryptionError').textContent = 'Download failed: ' + error.message;
+        hideDecryptionProgress();
+        
+        const errorContainer = document.getElementById('encryptionError');
+        if (errorContainer) {
+            errorContainer.style.display = 'block';
+            errorContainer.textContent = 'Download failed: ' + error.message;
+        }
+        
         hideDownloadOptions();
     }
 }
@@ -914,7 +954,7 @@ function initializeUploader() {
             formFileInput.files = dataTransfer.files;
 
             // Send the upload request
-            sendUploadRequest(encryptionKey);
+            await sendUploadRequest(encryptionKey);
         } catch (error) {
             console.error('Encryption failed:', error);
             showError('Encryption failed: ' + error.message);
@@ -933,58 +973,144 @@ function initializeUploader() {
     }
 
     // Send the upload request with progress tracking
-    function sendUploadRequest(encryptionKey = null) {
-        const formData = new FormData(uploadForm);
-        ensureCsrfToken(formData);
-
-        const xhr = new XMLHttpRequest();
-        xhr.open('POST', '/upload', true);
-
-        // Track upload progress
-        xhr.upload.onprogress = e => {
-            if (e.lengthComputable) {
-                // Only update up to 90% for upload progress
-                // This reserves the last 10% for server-side processing
-                const percent = Math.round((e.loaded / e.total) * 90);
-                updateProgress(percent);
-            }
-        };
-
-        // When upload is complete but before server processing is done
-        xhr.upload.onload = () => {
-            console.log("Upload completed, showing fish phrase");
-            updateProgress(90, getRandomFishPhrase());
+    async function sendUploadRequest(encryptionKey = null) {
+        try {
+            const formData = new FormData(uploadForm);
+            ensureCsrfToken(formData);
             
-            // Ensure the rotation happens
-            phrasesInterval = setInterval(function() {
-                console.log("Rotation timer fired");
-                progressText.textContent = getRandomFishPhrase();
-            }, 5000);
-        };
-
-        // Handle response
-        xhr.onload = function () {
-            if (xhr.status >= 200 && xhr.status < 400) {
-                // Success handling
-                updateProgress(100, '100% - Complete!');
-
-                // Add a small delay before redirect to show the completion
-                setTimeout(() => {
-                    // Check if we have an encryption key to append to the URL
-                    if (encryptionKey) {
-                        redirect(xhr, encryptionKey);
-                    } else {
-                        redirect(xhr);
+            // Create controller for aborting fetch request on timeout
+            const controller = new AbortController();
+            const signal = controller.signal;
+            
+            // Set timeout to 1 hour (3600000ms) for very large uploads
+            const timeoutId = setTimeout(() => {
+                controller.abort();
+                showError('Upload timed out. Please try with a smaller file or check your connection.');
+            }, 3600000);
+            
+            // Set up progress tracking
+            const fileSize = formFileInput.files[0].size;
+            let lastLoaded = 0;
+            let uploadComplete = false;
+            
+            // Start progress tracking interval
+            const progressTracker = setInterval(() => {
+                if (!uploadComplete) {
+                    // If at 90%, show fish phrases
+                    if (lastLoaded >= fileSize * 0.9) {
+                        if (!phrasesInterval) {
+                            console.log("Upload at 90%, showing fish phrase");
+                            updateProgress(90, getRandomFishPhrase());
+                            
+                            // Start rotating phrases every 5 seconds
+                            phrasesInterval = setInterval(function() {
+                                console.log("Rotation timer fired");
+                                progressText.textContent = getRandomFishPhrase();
+                            }, 5000);
+                        }
                     }
-                }, 500);
-            } else {
-                // Error handling
-                handleUploadError(xhr);
+                }
+            }, 500);
+            
+            try {
+                // Track upload progress using a ReadableStream
+                const reader = formFileInput.files[0].stream().getReader();
+                let receivedLength = 0;
+                
+                // Read the file stream
+                const streamProgress = async () => {
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        
+                        if (done) {
+                            break;
+                        }
+                        
+                        receivedLength += value.length;
+                        lastLoaded = receivedLength;
+                        const percent = Math.min(Math.round((receivedLength / fileSize) * 90), 89);
+                        updateProgress(percent);
+                    }
+                };
+                
+                // Start progress tracking in the background
+                streamProgress().catch(error => {
+                    console.warn("Progress tracking encountered an issue:", error);
+                    // This shouldn't stop the main upload
+                });
+                
+                // Send the actual upload request
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData,
+                    signal: signal,
+                    // Include credentials (cookies) for CSRF validation
+                    credentials: 'same-origin'
+                });
+                
+                // Upload is complete at this point
+                uploadComplete = true;
+                clearInterval(progressTracker);
+                
+                // Clear the timeout since request completed
+                clearTimeout(timeoutId);
+                
+                // Handle response
+                if (response.ok) {
+                    // Success handling
+                    updateProgress(100, '100% - Complete!');
+                    
+                    // Add a small delay before redirect to show the completion
+                    setTimeout(() => {
+                        // Redirect with encryption key if needed
+                        if (encryptionKey) {
+                            const redirectUrl = response.url || '/';
+                            window.location.href = redirectUrl + '#' + encryptionKey;
+                        } else {
+                            window.location.href = response.url || '/';
+                        }
+                    }, 500);
+                } else {
+                    // Error handling - parse error from response
+                    const responseText = await response.text();
+                    const errorMessage = parseErrorMessageFromHTML(responseText) || 
+                                        `Upload failed! Server returned status ${response.status}`;
+                    showError(errorMessage);
+                }
+            } catch (error) {
+                clearInterval(progressTracker);
+                clearTimeout(timeoutId);
+                
+                if (error.name === 'AbortError') {
+                    // Already handled by the timeout callback
+                    return;
+                }
+                
+                console.error('Fetch error:', error);
+                showError('Network error during upload. Please check your connection and try again.');
             }
-        };
-
-        xhr.onerror = () => showError('Network error during upload.');
-        xhr.send(formData);
+            
+        } catch (error) {
+            console.error('Upload preparation error:', error);
+            showError('Failed to prepare upload: ' + error.message);
+        }
+    }
+    
+    // Parse error message from HTML response
+    function parseErrorMessageFromHTML(htmlText) {
+        if (!htmlText || !htmlText.includes('Error:')) return null;
+        
+        try {
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(htmlText, 'text/html');
+            const errorElement = doc.querySelector('.error strong');
+            if (errorElement && errorElement.nextElementSibling) {
+                return errorElement.nextElementSibling.textContent;
+            }
+        } catch (e) {
+            console.error('Error parsing error response:', e);
+        }
+        return null;
     }
 
     // Ensure CSRF token is included
@@ -1051,31 +1177,6 @@ function initializeUploader() {
         }
     }
 
-    // Handle redirect after successful upload
-    function redirect(xhr, encryptionKey = null) {
-        // Reset UI before redirecting 
-        resetUploadUI();
-        
-        let location = xhr.getResponseHeader('Location') || xhr.responseURL;
-
-        // If we have an encryption key, append it as a URL fragment
-        if (location && encryptionKey) {
-            location += '#' + encryptionKey;
-        }
-
-        if (location) {
-            window.location.href = location;
-        } else {
-            window.location.href = '/';
-        }
-    }
-
-    // Handle upload errors
-    function handleUploadError(xhr) {
-        const errorMessage = parseErrorMessage(xhr) || 'Upload failed! Server returned status ' + xhr.status;
-        showError(errorMessage);
-    }
-
     // Show error message in progress area
     function showError(message) {
         // First reset the UI to show the original state
@@ -1102,23 +1203,6 @@ function initializeUploader() {
         
         // Hide the progress container
         progressContainer.style.display = 'none';
-    }
-
-    // Try to extract error message from HTML response
-    function parseErrorMessage(xhr) {
-        if (!xhr.responseText || !xhr.responseText.includes('Error:')) return null;
-
-        try {
-            const parser = new DOMParser();
-            const doc = parser.parseFromString(xhr.responseText, 'text/html');
-            const errorElement = doc.querySelector('.error strong');
-            if (errorElement && errorElement.nextElementSibling) {
-                return errorElement.nextElementSibling.textContent;
-            }
-        } catch (e) {
-            console.error('Error parsing error response:', e);
-        }
-        return null;
     }
 }
 

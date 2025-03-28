@@ -1400,4 +1400,56 @@ select:focus {
         padding: 10px;
         margin: 10px auto;
     }
+}
+
+/* Decryption progress styling */
+#decryptionProgress {
+    margin: 20px auto;
+    position: relative;
+    z-index: 100;
+    background-color: rgba(255, 255, 255, 0.9);
+    padding: 15px;
+    border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    max-width: 90%;
+    border: 1px solid rgba(26, 105, 133, 0.2);
+    clear: both; /* Ensures it starts on a new line */
+    display: none; /* Hidden by default */
+    width: 90%; /* Fixed width to match other elements */
+}
+
+/* When displayed, push other content down */
+#decryptionProgress.displayed {
+    display: block;
+    margin-bottom: 25px;
+}
+
+#decryptionProgressText {
+    margin-top: 10px;
+    font-weight: 600;
+    color: #1a6985;
+    text-align: center;
+}
+
+#decryptionProgress .progress {
+    height: 10px;
+    background-color: rgba(245, 245, 245, 0.8);
+    border-radius: 10px;
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1);
+    overflow: hidden;
+    position: relative;
+}
+
+#decryptionProgressBar {
+    background-color: #1a6985;
+    height: 100%;
+    border-radius: 10px;
+    width: 100%; /* Always show full progress for decryption */
+    animation: progress-pulse 1.5s infinite;
+}
+
+@keyframes progress-pulse {
+    0% { opacity: 0.7; }
+    50% { opacity: 1; }
+    100% { opacity: 0.7; }
 } 
