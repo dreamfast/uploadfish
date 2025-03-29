@@ -319,7 +319,7 @@ func validateContentType(contentType string, allowedTypes []string) error {
 // ServeFileByID serves a file using its UUID
 func (h *Handler) ServeFileByID(w http.ResponseWriter, r *http.Request) {
 	// Get ID from request using Chi router's URL parameter extraction
-	id := chi.URLParam(r, "id")
+	id := chi.URLParam(r, "fileID")
 
 	// Get file metadata from storage
 	fileMetadata, err := h.Storage.GetFile(id)

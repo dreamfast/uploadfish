@@ -169,6 +169,18 @@ class FileEncryption {
      * @returns {ArrayBuffer} - Decoded array buffer
      */
     static base64ToArrayBuffer(base64) {
+        if (!base64) {
+            console.error('Empty base64 string provided');
+            throw new Error('Invalid encryption key: Empty key provided');
+        }
+
+        if (typeof base64 !== 'string') {
+            console.error('Non-string provided to base64ToArrayBuffer');
+            throw new Error('Invalid encryption key: Key must be a string');
+        }
+
+        // Trim any whitespace that might have been introduced
+        base64 = base64.trim();
 
         // Restore standard base64 for atob
         base64 = base64.replace(/-/g, '+').replace(/_/g, '/');
@@ -178,9 +190,21 @@ class FileEncryption {
             base64 += '=';
         }
 
+        // Validate base64 string format
+        const base64Regex = /^[A-Za-z0-9+/=]+$/;
+        if (!base64Regex.test(base64)) {
+            console.error('Invalid characters in base64 string');
+            throw new Error('Invalid encryption key: Contains invalid characters');
+        }
 
         try {
             const binary = atob(base64);
+
+            // Check if we got a reasonable key length (should be 32 bytes for AES-256)
+            if (binary.length !== 32) {
+                console.warn(`Unusual key length: ${binary.length} bytes (expected 32 bytes for AES-256)`);
+                // Continue anyway since some keys might be different lengths
+            }
 
             const bytes = new Uint8Array(binary.length);
             for (let i = 0; i < binary.length; i++) {

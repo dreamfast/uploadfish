@@ -95,7 +95,7 @@ function handleEncryptedPreview() {
 
 /**
  * Validate encryption key by decrypting a sample before showing download options.
- * This ensures that we don't allow downloads with invalid keys.
+ * @returns {Promise<boolean>} True if validation passed, false otherwise
  */
 async function validateEncryptionSample(key, fileURL, mimeType, filename) {
     try {
@@ -108,55 +108,106 @@ async function validateEncryptionSample(key, fileURL, mimeType, filename) {
                 progressText.textContent = 'Validating encryption key...';
             }
         }
-        
-        // Fetch the sample data from the server
-        const sampleURL = fileURL.split('?')[0] + '.sample';
-        const sampleResponse = await fetch(sampleURL, {
-            credentials: 'omit',
-            mode: 'cors'
-        });
 
-        if (!sampleResponse.ok) {
-            // If the sample isn't available, we can't validate
-            // This is likely an old file before sample support was added
-            console.log('Sample not available, skipping validation');
+        // Step 1: Basic format validation of the key
+        if (!key) {
+            console.error('No encryption key provided');
+            showEncryptionError('No encryption key provided. The link may be incomplete.');
+            return false;
+        }
+        
+        if (key.length < 10) {
+            console.error('Encryption key is too short:', key.length);
+            showEncryptionError('Invalid encryption key format: Key is too short.');
+            return false;
+        }
+        
+        console.log('Basic key format validation passed, key length:', key.length);
+        
+        // Step 2: Get the sample file to validate against
+        let sampleResponse;
+        try {
+            // Get the base URL without query parameters for the sample file
+            const baseURL = fileURL.split('?')[0];
+            console.log('Fetching validation sample from:', baseURL + '.sample');
+            
+            sampleResponse = await fetch(baseURL + '.sample', {
+                credentials: 'omit',
+                mode: 'cors'
+            });
+        } catch (fetchError) {
+            // If we can't fetch the sample, assume key is valid (for backward compatibility)
+            console.warn('Error fetching validation sample:', fetchError);
             hideDecryptionProgress();
-            return;
-        }
-
-        // Get the sample data
-        const sampleData = await sampleResponse.arrayBuffer();
-        
-        console.log('Validating encryption key with sample data...');
-        
-        // Try to decrypt the sample
-        await FileEncryption.decryptFile(sampleData, key, mimeType);
-        
-        // If we got here, decryption succeeded - show success message
-        console.log('Encryption key is valid');
-        
-        // Update progress
-        const progressText = DOM.byId('decryptionProgressText');
-        if (progressText) {
-            progressText.textContent = 'Key validation successful';
+            return true;
         }
         
-        // Hide progress after a short delay
-        setTimeout(hideDecryptionProgress, 1000);
+        // If no sample file exists, it's an older file without sample validation
+        if (!sampleResponse.ok) {
+            console.log('No validation sample available, skipping validation');
+            hideDecryptionProgress();
+            return true;
+        }
         
+        // Step 3: Perform actual validation with sample decryption
+        try {
+            // Get the sample data
+            const sampleData = await sampleResponse.arrayBuffer();
+            console.log('Received validation sample data, size:', sampleData.byteLength, 'bytes');
+            
+            // Check if the sample is valid for decryption (needs at least IV + some content)
+            if (sampleData.byteLength < 13) {
+                console.warn('Sample is too small for validation:', sampleData.byteLength, 'bytes');
+                hideDecryptionProgress();
+                return true; // Assume valid for backward compatibility
+            }
+            
+            // Update progress text
+            const progressText = DOM.byId('decryptionProgressText');
+            if (progressText) {
+                progressText.textContent = 'Decrypting validation sample...';
+            }
+            
+            // Try to decrypt the sample with the provided key
+            try {
+                await FileEncryption.decryptFile(sampleData, key, mimeType);
+                console.log('Validation successful: Sample decrypted correctly');
+                
+                // Update progress text
+                if (progressText) {
+                    progressText.textContent = 'Key validation successful!';
+                }
+                
+                // Hide progress after a short delay
+                setTimeout(hideDecryptionProgress, 1000);
+                return true;
+            } catch (decryptError) {
+                console.error('Validation failed: Cannot decrypt sample with provided key:', decryptError);
+                showEncryptionError('Invalid encryption key: The provided key cannot decrypt this file.');
+                return false;
+            }
+        } catch (validationError) {
+            console.error('Error during sample validation process:', validationError);
+            showEncryptionError('Validation error: ' + validationError.message);
+            return false;
+        }
     } catch (error) {
-        console.error('Sample validation failed:', error);
-        
-        // Show error message
-        const encryptionError = DOM.byId('encryptionError');
-        if (encryptionError) {
-            encryptionError.style.display = 'block';
-            encryptionError.textContent = 'Unable to validate encryption key: ' + error.message;
-        }
-        
-        hideDownloadOptions();
-        hideDecryptionProgress();
+        // Handle any unexpected errors during the entire validation process
+        console.error('Unexpected error in validation process:', error);
+        showEncryptionError('Unexpected error during validation: ' + error.message);
+        return false;
     }
+}
+
+// Helper function to show encryption errors
+function showEncryptionError(message) {
+    const encryptionError = DOM.byId('encryptionError');
+    if (encryptionError) {
+        encryptionError.style.display = 'block';
+        encryptionError.textContent = message;
+    }
+    hideDownloadOptions();
+    hideDecryptionProgress();
 }
 
 // Hide preview containers for encrypted files
@@ -239,90 +290,78 @@ function showDecryptionProgress(message) {
 
 // Handle direct download of encrypted file
 async function handleEncryptedDownload(key, fileURL, mimeType, filename) {
+    let downloadURL = null;
+    let downloadLink = null;
+
     try {
-        // Show decryption progress
-        const progressContainer = DOM.byId('decryptionProgress');
-        if (progressContainer) {
-            progressContainer.style.display = 'block';
-            progressContainer.classList.add('displayed');
-            
-            const progressText = DOM.byId('decryptionProgressText');
-            if (progressText) {
-                progressText.textContent = 'Downloading encrypted file...';
-            }
-            
-            const progressBar = DOM.byId('decryptionProgressBar');
-            if (progressBar) {
-                progressBar.style.width = '0%';
-            }
+        // Initialize progress UI
+        showProgressUI('Initializing download...');
+        
+        // Validate inputs
+        if (!key) {
+            throw new Error('No encryption key provided');
+        }
+        if (!fileURL) {
+            throw new Error('No file URL provided');
         }
         
-        // Fetch the encrypted file
-        const fileResponse = await fetch(fileURL, {
-            credentials: 'omit',
-            mode: 'cors'
-        });
+        // Step 1: Download the encrypted file
+        showProgressUI('Downloading encrypted file...', 10);
+        
+        let fileResponse;
+        try {
+            fileResponse = await fetch(fileURL, {
+                credentials: 'omit',
+                mode: 'cors'
+            });
+        } catch (fetchError) {
+            throw new Error('Failed to download the file: Network error');
+        }
         
         if (!fileResponse.ok) {
-            throw new Error('Failed to download the file');
+            throw new Error(`Failed to download the file: Server returned ${fileResponse.status}`);
         }
         
-        // Update progress
-        const progressText = DOM.byId('decryptionProgressText');
-        if (progressText) {
-            progressText.textContent = 'Decrypting file...';
-        }
+        // Step 2: Get the encrypted data and start decryption
+        showProgressUI('Preparing to decrypt file...', 40);
         
-        const progressBar = DOM.byId('decryptionProgressBar');
-        if (progressBar) {
-            progressBar.style.width = '50%';
-        }
-        
-        // Get the encrypted data
         const encryptedData = await fileResponse.arrayBuffer();
         
-        // Decrypt the file
+        if (!encryptedData || encryptedData.byteLength < 13) {
+            throw new Error('Downloaded file is invalid or too small');
+        }
+        
+        console.log(`Downloaded encrypted file: ${formatSize(encryptedData.byteLength)} bytes`);
+        
+        // Step 3: Decrypt the file
+        showProgressUI('Decrypting file...', 60);
+        
         const decryptedBlob = await FileEncryption.decryptFile(encryptedData, key, mimeType);
         
-        // Update progress
-        if (progressBar) {
-            progressBar.style.width = '90%';
-        }
+        // Step 4: Prepare download
+        showProgressUI('Preparing download...', 80);
         
-        if (progressText) {
-            progressText.textContent = 'Preparing download...';
-        }
-        
-        // Create a download link and trigger it
-        const downloadURL = URL.createObjectURL(decryptedBlob);
-        const downloadLink = document.createElement('a');
+        downloadURL = URL.createObjectURL(decryptedBlob);
+        downloadLink = document.createElement('a');
         downloadLink.href = downloadURL;
-        downloadLink.download = filename;
+        downloadLink.download = filename || 'download';
         document.body.appendChild(downloadLink);
+        
+        // Step 5: Trigger download
+        showProgressUI('Starting download...', 90);
+        
         downloadLink.click();
         
-        // Clean up
-        setTimeout(() => {
-            document.body.removeChild(downloadLink);
-            URL.revokeObjectURL(downloadURL);
-        }, 100);
-        
-        // Complete progress
-        if (progressBar) {
-            progressBar.style.width = '100%';
-        }
-        
-        if (progressText) {
-            progressText.textContent = 'Download complete!';
-        }
+        // Step 6: Show completion
+        showProgressUI('Download complete!', 100);
         
         // Hide progress after a delay
         setTimeout(hideDecryptionProgress, 2000);
         
     } catch (error) {
-        console.error('Download failed:', error);
+        console.error('Download error:', error);
         
-        // Show error
+        // Show specific error message
         const encryptionError = DOM.byId('encryptionError');
         if (encryptionError) {
             encryptionError.style.display = 'block';
@@ -330,6 +369,48 @@ async function handleEncryptedDownload(key, fileURL, mimeType, filename) {
         }
         
         hideDecryptionProgress();
+    } finally {
+        // Clean up resources
+        if (downloadLink && downloadLink.parentNode) {
+            setTimeout(() => {
+                try {
+                    document.body.removeChild(downloadLink);
+                    if (downloadURL) {
+                        URL.revokeObjectURL(downloadURL);
+                    }
+                } catch (cleanupError) {
+                    console.warn('Cleanup error:', cleanupError);
+                }
+            }, 100);
+        }
+    }
+}
+
+// Format file size for display
+function formatSize(bytes) {
+    if (bytes < 1024) return bytes + ' bytes';
+    else if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+    else if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + ' MB';
+    else return (bytes / 1073741824).toFixed(1) + ' GB';
+}
+
+// Update progress UI with message and percentage
+function showProgressUI(message, percent = null) {
+    const progressContainer = DOM.byId('decryptionProgress');
+    const progressText = DOM.byId('decryptionProgressText');
+    const progressBar = DOM.byId('decryptionProgressBar');
+    
+    if (progressContainer) {
+        progressContainer.style.display = 'block';
+        progressContainer.classList.add('displayed');
+    }
+    
+    if (progressText && message) {
+        progressText.textContent = message;
+    }
+    
+    if (progressBar && percent !== null) {
+        progressBar.style.width = percent + '%';
     }
 }
 

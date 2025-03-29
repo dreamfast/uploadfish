@@ -306,9 +306,12 @@ function initializeUploader() {
 
     // Handle encryption and upload
     async function encryptAndUpload(file) {
+        let sampleInput = null;
         try {
             // Generate a random encryption key
+            console.log("Generating encryption key...");
             const encryptionKey = await FileEncryption.generateKey();
+            console.log("Key generation successful");
 
             // Start rotating encryption phrases during the encryption process
             updateProgress(20, getRandomEncryptionPhrase());
@@ -325,53 +328,64 @@ function initializeUploader() {
             // Update progress for sample encryption
             updateProgress(30, "Creating validation sample...");
             
-            // Encrypt the sample separately for validation
-            const encryptedSample = await FileEncryption.encryptFile(originalSample, encryptionKey);
-            const sampleArrayBuffer = await encryptedSample.arrayBuffer();
-            console.log("Encrypted sample size:", sampleArrayBuffer.byteLength, "bytes");
-            
-            // Convert sample to base64 for storage
-            const sampleBase64 = FileEncryption.arrayBufferToBase64(sampleArrayBuffer);
-            console.log("Sample base64 length:", sampleBase64.length);
-            
-            // Update progress for main file encryption
-            updateProgress(40, "Sample created! Encrypting main file...");
+            try {
+                // Encrypt the sample separately for validation
+                const encryptedSample = await FileEncryption.encryptFile(originalSample, encryptionKey);
+                const sampleArrayBuffer = await encryptedSample.arrayBuffer();
+                console.log("Encrypted sample size:", sampleArrayBuffer.byteLength, "bytes");
+                
+                // Convert sample to base64 for storage
+                const sampleBase64 = FileEncryption.arrayBufferToBase64(sampleArrayBuffer);
+                console.log("Sample base64 length:", sampleBase64.length);
+                
+                // Update progress for main file encryption
+                updateProgress(40, "Sample created! Encrypting main file...");
 
-            // Encrypt the main file
-            const encryptedBlob = await FileEncryption.encryptFile(file, encryptionKey);
+                // Encrypt the main file
+                const encryptedBlob = await FileEncryption.encryptFile(file, encryptionKey);
+                console.log("Main file encryption complete");
 
-            // Clear the encryption phrases interval
+                // Add the encrypted sample to a hidden form field
+                sampleInput = document.createElement('input');
+                sampleInput.type = 'hidden';
+                sampleInput.name = 'encrypted_sample';
+                sampleInput.value = sampleBase64;
+                elements.uploadForm.appendChild(sampleInput);
+
+                // Create a File object from the encrypted blob
+                const encryptedFile = new File([encryptedBlob], file.name, {
+                    type: file.type,
+                    lastModified: file.lastModified
+                });
+
+                // Copy the encrypted file to the form's file input
+                const dataTransfer = new DataTransfer();
+                dataTransfer.items.add(encryptedFile);
+                elements.formFileInput.files = dataTransfer.files;
+
+                // Update progress
+                updateProgress(70, "File encryption complete! Preparing upload...");
+
+                // Send the upload request
+                await sendUploadRequest(encryptionKey);
+            } catch (encryptionError) {
+                console.error('Encryption operation failed:', encryptionError);
+                throw new Error('Failed to encrypt file: ' + encryptionError.message);
+            }
+        } catch (error) {
+            console.error('Encryption process failed:', error);
+            showError('Encryption failed: ' + error.message);
+            
+            // Clean up if encryption fails
+            if (sampleInput && sampleInput.parentNode) {
+                sampleInput.parentNode.removeChild(sampleInput);
+            }
+        } finally {
+            // Always clear the encryption phrases interval
             if (phrasesInterval) {
                 clearInterval(phrasesInterval);
                 phrasesInterval = null;
             }
-
-            // Update progress
-            updateProgress(70, "File encryption complete! Preparing upload...");
-
-            // Add the encrypted sample to a hidden form field
-            const sampleInput = document.createElement('input');
-            sampleInput.type = 'hidden';
-            sampleInput.name = 'encrypted_sample';
-            sampleInput.value = sampleBase64;
-            elements.uploadForm.appendChild(sampleInput);
-
-            // Create a File object from the encrypted blob
-            const encryptedFile = new File([encryptedBlob], file.name, {
-                type: file.type,
-                lastModified: file.lastModified
-            });
-
-            // Copy the encrypted file to the form's file input
-            const dataTransfer = new DataTransfer();
-            dataTransfer.items.add(encryptedFile);
-            elements.formFileInput.files = dataTransfer.files;
-
-            // Send the upload request
-            await sendUploadRequest(encryptionKey);
-        } catch (error) {
-            console.error('Encryption failed:', error);
-            showError('Encryption failed: ' + error.message);
         }
     }
 
@@ -388,7 +402,15 @@ function initializeUploader() {
 
     // Send the upload request with progress tracking
     async function sendUploadRequest(encryptionKey = null) {
+        let xhr = null;
+        let timeoutId = null;
+        
         try {
+            // Validate form data
+            if (!elements.formFileInput.files || !elements.formFileInput.files.length) {
+                throw new Error('No file selected for upload');
+            }
+            
             const formData = new FormData(elements.uploadForm);
             ensureCsrfToken(formData);
             
@@ -397,25 +419,27 @@ function initializeUploader() {
             const signal = controller.signal;
             
             // Set timeout to 1 hour (3600000ms) for very large uploads
-            const timeoutId = setTimeout(() => {
+            timeoutId = setTimeout(() => {
                 controller.abort();
                 showError('Upload timed out. Please try with a smaller file or check your connection.');
             }, 3600000);
             
             // Set up progress tracking
             const fileSize = elements.formFileInput.files[0].size;
+            console.log(`Starting upload of file (${formatFileSize(fileSize)})`);
+            
             let uploadComplete = false;
             let uploadStartTime = Date.now();
             let lastProgressUpdate = uploadStartTime;
             let bytesUploaded = 0;
             
             // Use XMLHttpRequest for accurate progress tracking
-            const xhr = new XMLHttpRequest();
+            xhr = new XMLHttpRequest();
             xhr.open('POST', '/upload', true);
             xhr.timeout = 3600000; // 1 hour timeout
             
             // Set up proper CSRF token
-            const csrfToken = document.getElementById('formCsrfToken').value;
+            const csrfToken = document.getElementById('formCsrfToken')?.value;
             if (csrfToken) {
                 xhr.setRequestHeader('X-CSRF-Token', csrfToken);
             }
@@ -429,6 +453,13 @@ function initializeUploader() {
                     // Only update progress every 200ms to avoid too many UI updates
                     if (now - lastProgressUpdate > 200) {
                         const percent = Math.min(Math.round((bytesUploaded / fileSize) * 100), 99);
+                        const elapsedSeconds = (now - uploadStartTime) / 1000;
+                        const bytesPerSecond = bytesUploaded / elapsedSeconds;
+                        
+                        // Log upload speed for debugging
+                        if (now - uploadStartTime > 5000) { // After 5 seconds, show speed
+                            console.log(`Upload speed: ${formatFileSize(bytesPerSecond)}/s`);
+                        }
                         
                         // Show fish phrases throughout the entire upload process
                         if (!phrasesInterval) {
@@ -465,11 +496,15 @@ function initializeUploader() {
                 uploadComplete = true;
                 
                 // Clear the timeout since request completed
-                clearTimeout(timeoutId);
+                if (timeoutId) {
+                    clearTimeout(timeoutId);
+                    timeoutId = null;
+                }
                 
                 if (xhr.status >= 200 && xhr.status < 300) {
                     // Success handling
                     updateProgress(100, '100% - Complete!');
+                    console.log('Upload successful');
                     
                     // Add a small delay before redirect to show the completion
                     setTimeout(() => {
@@ -485,13 +520,17 @@ function initializeUploader() {
                     // Error handling - parse error from response
                     const errorMessage = parseErrorMessageFromHTML(xhr.responseText) || 
                                       `Upload failed! Server returned status ${xhr.status}`;
+                    console.error('Upload error:', errorMessage);
                     showError(errorMessage);
                 }
             };
             
             // Handle network errors
             xhr.onerror = function() {
-                clearTimeout(timeoutId);
+                if (timeoutId) {
+                    clearTimeout(timeoutId);
+                    timeoutId = null;
+                }
                 console.error('XHR error during upload');
                 showError('Network error during upload. Please check your connection and try again.');
             };
@@ -504,9 +543,20 @@ function initializeUploader() {
             
             // Send the form data
             xhr.send(formData);
+            console.log('Upload request sent');
             
         } catch (error) {
             console.error('Upload preparation error:', error);
+            
+            // Clean up any pending requests or timeouts
+            if (timeoutId) {
+                clearTimeout(timeoutId);
+            }
+            
+            if (xhr && xhr.readyState !== 4) {
+                xhr.abort();
+            }
+            
             showError('Failed to prepare upload: ' + error.message);
         }
     }
