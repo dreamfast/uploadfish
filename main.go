@@ -211,7 +211,9 @@ func securityHeadersMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("Content-Security-Policy",
 			"default-src 'none'; "+
 				"script-src 'self' 'nonce-"+nonce+"'; "+ // Use nonce for scripts
-				"style-src 'self' 'nonce-"+nonce+"'; "+ // Use nonce for styles
+				"script-src-elem 'self' 'nonce-"+nonce+"'; "+ // Allow script elements
+				"style-src 'self' 'nonce-"+nonce+"' 'unsafe-inline'; "+ // Use nonce for styles
+				"style-src-attr 'unsafe-inline'; "+ // Allow inline style attributes
 				"img-src 'self' data: blob:; "+ // Allow images and file previews
 				"media-src 'self' data: blob:; "+ // For audio/video previews
 				"connect-src 'self'; "+ // Only allow API calls to same origin

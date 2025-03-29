@@ -5,6 +5,20 @@
     <title>{{if .Title}}{{.Title}}{{else}}Upload Fish{{end}}</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <link rel="stylesheet" href="/static/css/style.css">
+    
+    <!-- Common modules -->
+    <script src="/static/js/modules/dom.js"></script>
+    <script src="/static/js/modules/utils.js"></script>
+    <script src="/static/js/modules/encryption.js"></script>
+    
+    <!-- Page-specific modules (loaded conditionally based on page) -->
+    {{if eq .PageType "upload"}}
+    <script src="/static/js/modules/upload.js"></script>
+    {{else if eq .PageType "preview"}}
+    <script src="/static/js/modules/preview.js"></script>
+    {{end}}
+    
+    <!-- Main JavaScript -->
     <script src="/static/js/main.js"></script>
     
     <!-- Favicon and manifest -->
