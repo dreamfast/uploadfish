@@ -2,3 +2,4 @@ uploadfish
 data/*
 .idea
 *.tar.gz
+.cursor
