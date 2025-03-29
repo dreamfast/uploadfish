@@ -46,6 +46,8 @@ func New(cfg *config.Config, store *storage.Storage, csrfProtection *utils.CSRFP
 			}
 			return dict, nil
 		},
+		// WARNING: This function bypasses HTML escaping and should only be used for trusted content
+		// that has been thoroughly validated. Improper use can lead to XSS vulnerabilities.
 		"safe": func(s string) template.HTML {
 			return template.HTML(s)
 		},
@@ -78,13 +80,7 @@ func (h *Handler) Index(w http.ResponseWriter, r *http.Request) {
 		CSRFToken:     tokens.FormToken,
 	}
 
-	w.Header().Set("Content-Type", "text/html")
-	if err := h.Templates.ExecuteTemplate(w, "index.html", data); err != nil {
-		http.Error(w, "Error rendering template", http.StatusInternalServerError)
-		LogError(err, "Template error", map[string]interface{}{
-			"template": "index.html",
-		})
-	}
+	h.renderTemplate(w, r, "index.html", data, 0)
 }
 
 // Upload handles file uploads
@@ -103,7 +99,7 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 		LogError(err, "Error parsing multipart form", map[string]interface{}{
 			"max_size": h.Config.MaxUploadSize,
 		})
-		h.renderError(w, fmt.Sprintf("The uploaded file is too big. Please choose a file that's less than %d MB.", h.Config.MaxUploadSize/(1<<20)), http.StatusBadRequest)
+		h.renderError(w, r, fmt.Sprintf("The uploaded file is too big. Please choose a file that's less than %d MB.", h.Config.MaxUploadSize/(1<<20)), http.StatusBadRequest)
 		return
 	}
 
@@ -118,7 +114,7 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 		LogError(err, "Error retrieving file", map[string]interface{}{
 			"form_key": "file",
 		})
-		h.renderError(w, fmt.Sprintf("Error retrieving the file: %v", err), http.StatusBadRequest)
+		h.renderError(w, r, fmt.Sprintf("Error retrieving the file: %v", err), http.StatusBadRequest)
 		return
 	}
 	defer func(file multipart.File) {
@@ -131,7 +127,7 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 	// Process and validate file
 	fileMetadata, err := h.processUploadedFile(file, handler, r)
 	if err != nil {
-		h.renderError(w, err.Error(), http.StatusBadRequest)
+		h.renderError(w, r, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -141,7 +137,7 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 			"file_id":   fileMetadata.ID,
 			"file_size": fileMetadata.Size,
 		})
-		h.renderError(w, fmt.Sprintf("Error saving file: %v", err), http.StatusInternalServerError)
+		h.renderError(w, r, fmt.Sprintf("Error saving file: %v", err), http.StatusInternalServerError)
 		return
 	}
 
@@ -165,7 +161,7 @@ func (h *Handler) validateCSRF(w http.ResponseWriter, r *http.Request) bool {
 		LogInfo("Invalid or missing CSRF token", map[string]interface{}{
 			"ip": r.RemoteAddr,
 		})
-		h.renderError(w, "Invalid or missing CSRF token, try refreshing the page.", http.StatusForbidden)
+		h.renderError(w, r, "Invalid or missing CSRF token, try refreshing the page.", http.StatusForbidden)
 		return false
 	}
 
@@ -173,7 +169,7 @@ func (h *Handler) validateCSRF(w http.ResponseWriter, r *http.Request) bool {
 		LogInfo("Invalid or missing CSRF token", map[string]interface{}{
 			"ip": r.RemoteAddr,
 		})
-		h.renderError(w, "Invalid or missing CSRF token, try refreshing the page.", http.StatusForbidden)
+		h.renderError(w, r, "Invalid or missing CSRF token, try refreshing the page.", http.StatusForbidden)
 		return false
 	}
 	return true
@@ -328,7 +324,7 @@ func (h *Handler) ServeFileByID(w http.ResponseWriter, r *http.Request) {
 	// Get file metadata from storage
 	fileMetadata, err := h.Storage.GetFile(id)
 	if err != nil {
-		h.renderError(w, "File not found or has expired", http.StatusNotFound)
+		h.renderError(w, r, "File not found or has expired", http.StatusNotFound)
 		return
 	}
 
@@ -341,7 +337,7 @@ func (h *Handler) ServeFileByID(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 
-		h.renderError(w, "This file has expired and is no longer available", http.StatusGone)
+		h.renderError(w, r, "This file has expired and is no longer available", http.StatusGone)
 		return
 	}
 
@@ -459,12 +455,7 @@ func servePreviewPage(w http.ResponseWriter, r *http.Request, h *Handler, fileMe
 	}
 
 	// Serve the preview template
-	w.Header().Set("Content-Type", "text/html")
-	if err := h.Templates.ExecuteTemplate(w, "preview.html", data); err != nil {
-		LogError(err, "Error rendering preview page", nil)
-		http.Error(w, "Error rendering preview page", http.StatusInternalServerError)
-		return
-	}
+	h.renderTemplate(w, r, "preview.html", data, 0)
 }
 
 // isPreviewableType checks if a file can be previewed based on its mime type
@@ -517,18 +508,8 @@ func (h *Handler) ErrorPage(w http.ResponseWriter, r *http.Request) {
 		CSRFToken:    tokens.FormToken,
 	}
 
-	// Set content type and status code
-	w.Header().Set("Content-Type", "text/html")
-	w.WriteHeader(statusCode)
-
-	// Execute the error template
-	if err := h.Templates.ExecuteTemplate(w, "error.html", data); err != nil {
-		// Fallback to basic error if template fails
-		LogError(err, "Error template failed", map[string]interface{}{
-			"template": "error.html",
-		})
-		http.Error(w, fmt.Sprintf("Error: %s", errMsg), statusCode)
-	}
+	// Render the error template
+	h.renderTemplate(w, r, "error.html", data, statusCode)
 }
 
 // Helper functions
@@ -558,7 +539,7 @@ func getAllowedTypesDisplay(allowedTypes []string) string {
 }
 
 // Helper function to render error
-func (h *Handler) renderError(w http.ResponseWriter, errMsg string, statusCode int) {
+func (h *Handler) renderError(w http.ResponseWriter, r *http.Request, errMsg string, statusCode int) {
 	LogInfo("Rendering error page", map[string]interface{}{
 		"error_message": errMsg,
 		"status_code":   statusCode,
@@ -579,18 +560,8 @@ func (h *Handler) renderError(w http.ResponseWriter, errMsg string, statusCode i
 		CSRFToken:    tokens.FormToken,
 	}
 
-	// Set content type and status code
-	w.Header().Set("Content-Type", "text/html")
-	w.WriteHeader(statusCode)
-
-	// Execute the error template
-	if err := h.Templates.ExecuteTemplate(w, "error.html", data); err != nil {
-		// Fallback to basic error if template fails
-		LogError(err, "Error template failed", map[string]interface{}{
-			"template": "error.html",
-		})
-		http.Error(w, fmt.Sprintf("Error: %s", errMsg), statusCode)
-	}
+	// Render the error template with the appropriate status code
+	h.renderTemplate(w, r, "error.html", data, statusCode)
 }
 
 // sanitizeFilename removes potentially dangerous characters and path traversal sequences from filenames
@@ -616,24 +587,12 @@ func sanitizeFilename(filename string) string {
 
 // Terms renders the terms of service page
 func (h *Handler) Terms(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html")
-	if err := h.Templates.ExecuteTemplate(w, "terms.html", nil); err != nil {
-		http.Error(w, "Error rendering template", http.StatusInternalServerError)
-		LogError(err, "Template error", map[string]interface{}{
-			"template": "terms.html",
-		})
-	}
+	h.renderTemplate(w, r, "terms.html", nil, 0)
 }
 
 // Privacy renders the privacy policy page
 func (h *Handler) Privacy(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html")
-	if err := h.Templates.ExecuteTemplate(w, "privacy.html", nil); err != nil {
-		http.Error(w, "Error rendering template", http.StatusInternalServerError)
-		LogError(err, "Template error", map[string]interface{}{
-			"template": "privacy.html",
-		})
-	}
+	h.renderTemplate(w, r, "privacy.html", nil, 0)
 }
 
 // ServeEncryptedSample serves just the encrypted sample for key validation
@@ -653,7 +612,7 @@ func (h *Handler) ServeEncryptedSample(w http.ResponseWriter, r *http.Request) {
 		LogError(err, "File not found when requesting sample", map[string]interface{}{
 			"file_id": fileID,
 		})
-		h.renderError(w, fmt.Sprintf("File not found or expired"), http.StatusNotFound)
+		h.renderError(w, r, fmt.Sprintf("File not found or expired"), http.StatusNotFound)
 		return
 	}
 
@@ -664,7 +623,7 @@ func (h *Handler) ServeEncryptedSample(w http.ResponseWriter, r *http.Request) {
 			"is_encrypted": fileMetadata.IsEncrypted,
 			"sample_size":  len(fileMetadata.EncryptedSample),
 		})
-		h.renderError(w, fmt.Sprintf("No encryption sample available for this file"), http.StatusNotFound)
+		h.renderError(w, r, fmt.Sprintf("No encryption sample available for this file"), http.StatusNotFound)
 		return
 	}
 
@@ -688,4 +647,32 @@ func (h *Handler) ServeEncryptedSample(w http.ResponseWriter, r *http.Request) {
 		"file_id":     fileID,
 		"sample_size": len(fileMetadata.EncryptedSample),
 	})
+}
+
+// renderTemplate executes the template with the given name and data
+// It handles errors consistently and logs any issues
+func (h *Handler) renderTemplate(w http.ResponseWriter, r *http.Request, templateName string, data interface{}, statusCode int) {
+	// Set default status code if not provided
+	if statusCode == 0 {
+		statusCode = http.StatusOK
+	}
+
+	// Set content type and status code
+	w.Header().Set("Content-Type", "text/html")
+	if statusCode != http.StatusOK {
+		w.WriteHeader(statusCode)
+	}
+
+	// Execute the template
+	if err := h.Templates.ExecuteTemplate(w, templateName, data); err != nil {
+		// Log the error
+		LogError(err, "Template error", map[string]interface{}{
+			"template": templateName,
+		})
+
+		// Only respond with an error if we haven't already written to the response
+		if statusCode == http.StatusOK {
+			http.Error(w, "Error rendering template", http.StatusInternalServerError)
+		}
+	}
 }

@@ -194,17 +194,24 @@ func loggingMiddleware(next http.Handler) http.Handler {
 // securityHeadersMiddleware adds security headers to responses
 func securityHeadersMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Generate a nonce for CSP
+		nonce := utils.GenerateRandomString(16)
+
+		// Store the nonce in the request context for use in templates
+		ctx := context.WithValue(r.Context(), "csp-nonce", nonce)
+		r = r.WithContext(ctx)
+
 		// Set security headers
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("X-XSS-Protection", "1; mode=block")
 		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
 
-		// Strict CSP configuration
+		// Strict CSP configuration with nonce instead of unsafe-inline
 		w.Header().Set("Content-Security-Policy",
 			"default-src 'none'; "+
-				"script-src 'self' 'unsafe-inline'; "+ // Required for inline event handlers
-				"style-src 'self' 'unsafe-inline'; "+ // Required for inline styles
+				"script-src 'self' 'nonce-"+nonce+"'; "+ // Use nonce for scripts
+				"style-src 'self' 'nonce-"+nonce+"'; "+ // Use nonce for styles
 				"img-src 'self' data: blob:; "+ // Allow images and file previews
 				"media-src 'self' data: blob:; "+ // For audio/video previews
 				"connect-src 'self'; "+ // Only allow API calls to same origin

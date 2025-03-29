@@ -3,6 +3,59 @@
  */
 
 /**
+ * DOM utility functions for more efficient element selection and manipulation
+ */
+const DOM = {
+    // Get element by ID with caching
+    byId: (() => {
+        const cache = {};
+        return (id) => {
+            if (!(id in cache)) {
+                cache[id] = document.getElementById(id);
+            }
+            return cache[id];
+        };
+    })(),
+    
+    // Get elements by class name
+    byClass: (className, parent = document) => parent.getElementsByClassName(className),
+    
+    // Get elements by tag name
+    byTag: (tagName, parent = document) => parent.getElementsByTagName(tagName),
+    
+    // Query selector
+    query: (selector, parent = document) => parent.querySelector(selector),
+    
+    // Query selector all
+    queryAll: (selector, parent = document) => parent.querySelectorAll(selector),
+    
+    // Create element with attributes and properties
+    create: (tag, attributes = {}, content = '') => {
+        const element = document.createElement(tag);
+        
+        // Set attributes
+        Object.entries(attributes).forEach(([key, value]) => {
+            if (key === 'style' && typeof value === 'object') {
+                Object.entries(value).forEach(([prop, val]) => {
+                    element.style[prop] = val;
+                });
+            } else if (key === 'className') {
+                element.className = value;
+            } else {
+                element.setAttribute(key, value);
+            }
+        });
+        
+        // Set content
+        if (content) {
+            element.textContent = content;
+        }
+        
+        return element;
+    }
+};
+
+/**
  * FileEncryption utility class
  * Uses Web Crypto API for secure client-side encryption
  */
@@ -250,7 +303,7 @@ function initializePreviewPage() {
     const copyButton = document.getElementById('copyLinkBtn');
     if (copyButton) {
         copyButton.addEventListener('click', function () {
-            copyToClipboard();
+            copyLinkToClipboard();
         });
     }
 
@@ -267,8 +320,13 @@ function handleEncryptedPreview() {
     const mimeType = body.getAttribute('data-mime-type');
     const filename = body.getAttribute('data-filename');
 
+    // Only show encryption-related elements if the file is actually encrypted
     if (isEncrypted) {
-        document.getElementById('encryptionNotice').style.display = 'flex';
+        // Show encryption notice
+        const encryptionNotice = DOM.byId('encryptionNotice');
+        if (encryptionNotice) {
+            encryptionNotice.style.display = 'flex';
+        }
 
         // Get the encryption key from the URL fragment
         const encryptionKey = window.location.hash.substring(1);
@@ -276,17 +334,19 @@ function handleEncryptedPreview() {
         // Validate key format first
         if (encryptionKey && validateEncryptionKeyFormat(encryptionKey)) {
             // Format looks valid, but we won't load preview for encrypted files
-            document.getElementById('encryptionError').style.display = 'none';
+            const encryptionError = DOM.byId('encryptionError');
+            if (encryptionError) {
+                encryptionError.style.display = 'none';
+            }
 
-            // Show the download section instead
-            const downloadSection = document.getElementById('fileActions');
+            // Show the download section
+            const downloadSection = DOM.byId('fileActions');
             if (downloadSection) {
                 downloadSection.style.display = 'flex';
             }
-            // Insert this message before the download button
 
             // Update download button to include the key in the URL
-            const downloadBtn = document.getElementById('downloadBtn');
+            const downloadBtn = DOM.byId('downloadBtn');
             if (downloadBtn) {
                 const currentHref = downloadBtn.getAttribute('href');
                 downloadBtn.setAttribute('href', currentHref + '#' + encryptionKey);
@@ -302,9 +362,24 @@ function handleEncryptedPreview() {
             validateEncryptionSample(encryptionKey, fileURL, mimeType, filename);
         } else {
             // Invalid key format
-            document.getElementById('encryptionError').style.display = 'block';
-            document.getElementById('encryptionError').textContent = 'Invalid encryption key format. The link may be incomplete or incorrect.';
+            const encryptionError = DOM.byId('encryptionError');
+            if (encryptionError) {
+                encryptionError.style.display = 'block';
+                encryptionError.textContent = 'Invalid encryption key format. The link may be incomplete or incorrect.';
+            }
             hideDownloadOptions();
+        }
+    } else {
+        // For non-encrypted files, make sure encryption-related elements are hidden
+        const encryptionNotice = DOM.byId('encryptionNotice');
+        const encryptionError = DOM.byId('encryptionError');
+        
+        if (encryptionNotice) {
+            encryptionNotice.style.display = 'none';
+        }
+        
+        if (encryptionError) {
+            encryptionError.style.display = 'none';
         }
     }
 }
@@ -316,10 +391,10 @@ function handleEncryptedPreview() {
 async function validateEncryptionSample(key, fileURL, mimeType, filename) {
     try {
         // Show progress indicator
-        const progressContainer = document.getElementById('decryptionProgress');
+        const progressContainer = DOM.byId('decryptionProgress');
         if (progressContainer) {
             progressContainer.style.display = 'block';
-            const progressText = document.getElementById('decryptionProgressText');
+            const progressText = DOM.byId('decryptionProgressText');
             if (progressText) {
                 progressText.textContent = 'Validating encryption key...';
             }
@@ -344,39 +419,34 @@ async function validateEncryptionSample(key, fileURL, mimeType, filename) {
         const sampleData = await sampleResponse.arrayBuffer();
         
         console.log('Validating encryption key with sample data...');
-        console.log('Sample data size:', sampleData.byteLength, 'bytes');
         
-        // Ensure the sample is large enough to decrypt
-        if (sampleData.byteLength < 20) {
-            console.error('Sample data is too small to be valid');
-            throw new Error('Invalid sample data (too small)');
+        // Try to decrypt the sample
+        await FileEncryption.decryptFile(sampleData, key, mimeType);
+        
+        // If we got here, decryption succeeded - show success message
+        console.log('Encryption key is valid');
+        
+        // Update progress
+        const progressText = DOM.byId('decryptionProgressText');
+        if (progressText) {
+            progressText.textContent = 'Key validation successful';
         }
         
-        try {
-            // Try to decrypt the sample
-            await FileEncryption.decryptFile(sampleData, key, mimeType);
-            console.log('✓ Key validation successful!');
-            hideDecryptionProgress();
-        } catch (decryptError) {
-            // Decryption failed, key is invalid
-            console.error('Sample decryption failed:', decryptError);
-            throw new Error('Invalid decryption key. The file cannot be decrypted with this key.');
-        }
+        // Hide progress after a short delay
+        setTimeout(hideDecryptionProgress, 1000);
+        
     } catch (error) {
-        console.error('Key validation error:', error);
-        
-        // Hide progress and show error
-        hideDecryptionProgress();
+        console.error('Sample validation failed:', error);
         
         // Show error message
-        const errorContainer = document.getElementById('encryptionError');
-        if (errorContainer) {
-            errorContainer.style.display = 'block';
-            errorContainer.textContent = error.message || 'Invalid decryption key';
+        const encryptionError = DOM.byId('encryptionError');
+        if (encryptionError) {
+            encryptionError.style.display = 'block';
+            encryptionError.textContent = 'Unable to validate encryption key: ' + error.message;
         }
         
-        // Hide download options
         hideDownloadOptions();
+        hideDecryptionProgress();
     }
 }
 
@@ -424,19 +494,20 @@ function validateEncryptionKeyFormat(key) {
 
 // Hide download options when decryption fails
 function hideDownloadOptions() {
-    // Hide download button and copy link button, but keep the "Upload Another File" button
-    const downloadBtn = document.getElementById('downloadBtn');
-    const copyLinkBtn = document.getElementById('copyLinkBtn');
-    const downloadTip = document.getElementById('downloadTip');
-
-    if (downloadBtn) downloadBtn.style.display = 'none';
-    if (copyLinkBtn) copyLinkBtn.style.display = 'none';
-    if (downloadTip) downloadTip.style.display = 'none';
+    const downloadSection = DOM.byId('fileActions');
+    if (downloadSection) {
+        downloadSection.style.display = 'none';
+    }
+    
+    const downloadTip = DOM.byId('downloadTip');
+    if (downloadTip) {
+        downloadTip.style.display = 'none';
+    }
 }
 
 // Hide decryption progress display
 function hideDecryptionProgress() {
-    const progressContainer = document.getElementById('decryptionProgress');
+    const progressContainer = DOM.byId('decryptionProgress');
     if (progressContainer) {
         progressContainer.style.display = 'none';
         progressContainer.classList.remove('displayed');
@@ -445,8 +516,8 @@ function hideDecryptionProgress() {
 
 // Show decryption progress 
 function showDecryptionProgress(message) {
-    const progressContainer = document.getElementById('decryptionProgress');
-    const progressText = document.getElementById('decryptionProgressText');
+    const progressContainer = DOM.byId('decryptionProgress');
+    const progressText = DOM.byId('decryptionProgressText');
     
     if (progressContainer && progressText) {
         if (message) {
@@ -460,199 +531,144 @@ function showDecryptionProgress(message) {
 // Handle direct download of encrypted file
 async function handleEncryptedDownload(key, fileURL, mimeType, filename) {
     try {
-        // First validate the key format
-        if (!validateEncryptionKeyFormat(key)) {
-            throw new Error('Invalid encryption key format');
+        // Show decryption progress
+        const progressContainer = DOM.byId('decryptionProgress');
+        if (progressContainer) {
+            progressContainer.style.display = 'block';
+            progressContainer.classList.add('displayed');
+            
+            const progressText = DOM.byId('decryptionProgressText');
+            if (progressText) {
+                progressText.textContent = 'Downloading encrypted file...';
+            }
+            
+            const progressBar = DOM.byId('decryptionProgressBar');
+            if (progressBar) {
+                progressBar.style.width = '0%';
+            }
         }
-
-        // Hide any error message
-        const errorContainer = document.getElementById('encryptionError');
-        if (errorContainer) {
-            errorContainer.style.display = 'none';
+        
+        // Fetch the encrypted file
+        const fileResponse = await fetch(fileURL, {
+            credentials: 'omit',
+            mode: 'cors'
+        });
+        
+        if (!fileResponse.ok) {
+            throw new Error('Failed to download the file');
         }
-
-        // Set initial progress bar appearance
-        const progressBar = document.getElementById('decryptionProgressBar');
+        
+        // Update progress
+        const progressText = DOM.byId('decryptionProgressText');
+        if (progressText) {
+            progressText.textContent = 'Decrypting file...';
+        }
+        
+        const progressBar = DOM.byId('decryptionProgressBar');
+        if (progressBar) {
+            progressBar.style.width = '50%';
+        }
+        
+        // Get the encrypted data
+        const encryptedData = await fileResponse.arrayBuffer();
+        
+        // Decrypt the file
+        const decryptedBlob = await FileEncryption.decryptFile(encryptedData, key, mimeType);
+        
+        // Update progress
+        if (progressBar) {
+            progressBar.style.width = '90%';
+        }
+        
+        if (progressText) {
+            progressText.textContent = 'Preparing download...';
+        }
+        
+        // Create a download link and trigger it
+        const downloadURL = URL.createObjectURL(decryptedBlob);
+        const downloadLink = document.createElement('a');
+        downloadLink.href = downloadURL;
+        downloadLink.download = filename;
+        document.body.appendChild(downloadLink);
+        downloadLink.click();
+        
+        // Clean up
+        setTimeout(() => {
+            document.body.removeChild(downloadLink);
+            URL.revokeObjectURL(downloadURL);
+        }, 100);
+        
+        // Complete progress
         if (progressBar) {
             progressBar.style.width = '100%';
         }
         
-        // Show progress with initial message
-        showDecryptionProgress('Validating encryption key...');
-
-        try {
-            // First fetch the sample data from the server to validate the key
-            const sampleURL = fileURL.split('?')[0] + '.sample';
-            const sampleResponse = await fetch(sampleURL, {
-                // Ensure credentials aren't sent to avoid CORS preflight
-                credentials: 'omit',
-                // Allow CORS
-                mode: 'cors'
-            });
-
-            if (!sampleResponse.ok) {
-                // If sample isn't available (likely old file), proceed with full download
-                showDecryptionProgress('Sample not available. Downloading full file...');
-                await proceedWithEncryptedDownload(key, fileURL, mimeType, filename);
-                return;
-            }
-
-            // Get the sample data
-            const sampleData = await sampleResponse.arrayBuffer();
-            
-            // Updated version with clearer messaging and handling for the separately encrypted sample
-            try {
-                console.log('Validating encryption key with separately encrypted sample...');
-                console.log('Sample data size:', sampleData.byteLength, 'bytes');
-                
-                // Ensure we have a valid sample to decrypt
-                if (sampleData.byteLength < 20) {
-                    console.error('Sample data is too small to be valid');
-                    throw new Error('Sample data is invalid (too small to decrypt)');
-                }
-                
-                // Decrypt the sample
-                try {
-                    const decryptedSample = await FileEncryption.decryptFile(sampleData, key, mimeType);
-                    
-                    // If we get here, decryption succeeded, so the key is valid
-                    console.log('✓ Key validation successful! Sample decrypted to', decryptedSample.size, 'bytes');
-                    showDecryptionProgress('Key validated, downloading file...');
-                    
-                    // Proceed with full file download
-                    await proceedWithEncryptedDownload(key, fileURL, mimeType, filename);
-                } catch (decryptError) {
-                    console.error('Sample decryption failed:', decryptError);
-                    throw new Error('Invalid decryption key. The file cannot be decrypted with this key.');
-                }
-            } catch (validationError) {
-                // Always abort download if validation fails
-                console.error('Key validation failed:', validationError);
-                throw new Error('Invalid decryption key. The file cannot be decrypted with this key.');
-            }
-        } catch (validationError) {
-            // Never proceed with download if validation fails
-            console.error('Decryption validation failed:', validationError);
-            throw validationError;
-        }
-    } catch (error) {
-        console.error('Download preparation failed:', error);
-        
-        // Clear progress display and show error
-        hideDecryptionProgress();
-        
-        // Show error message
-        const errorContainer = document.getElementById('encryptionError');
-        if (errorContainer) {
-            errorContainer.style.display = 'block';
-            errorContainer.textContent = error.message || 'Failed to prepare download';
+        if (progressText) {
+            progressText.textContent = 'Download complete!';
         }
         
-        hideDownloadOptions();
-    }
-}
-
-// Proceed with encrypted download after key validation
-async function proceedWithEncryptedDownload(key, fileURL, mimeType, filename) {
-    try {
-        // Show decryption progress
-        showDecryptionProgress('Downloading file...');
-
-        // Fetch the encrypted file
-        const response = await fetch(fileURL, {
-            // Ensure credentials aren't sent to avoid CORS preflight
-            credentials: 'omit',
-            // Allow CORS
-            mode: 'cors'
-        });
-        if (!response.ok) {
-            throw new Error('Failed to fetch file');
-        }
-
-        // Get the encrypted data
-        const encryptedData = await response.arrayBuffer();
-
-        // Check if we have a valid size
-        if (encryptedData.byteLength < 20) {
-            console.error('Downloaded data is too small to be a valid encrypted file');
-            throw new Error('Downloaded data appears to be invalid (too small)');
-        }
-
-        showDecryptionProgress('Decrypting...');
-
-        try {
-            // Decrypt the file
-            const decryptedBlob = await FileEncryption.decryptFile(encryptedData, key, mimeType);
-
-            // Trigger download
-            showDecryptionProgress('Download starting...');
-
-            const a = document.createElement('a');
-            a.href = URL.createObjectURL(decryptedBlob);
-            a.download = filename;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-
-            // Hide progress after a short delay
-            setTimeout(() => {
-                hideDecryptionProgress();
-            }, 1500);
-        } catch (decryptError) {
-            console.error('Decryption failed:', decryptError);
-            hideDecryptionProgress();
-            
-            const errorContainer = document.getElementById('encryptionError');
-            if (errorContainer) {
-                errorContainer.style.display = 'block';
-                errorContainer.textContent = 'Decryption failed: ' + decryptError.message;
-            }
-            
-            hideDownloadOptions();
-        }
+        // Hide progress after a delay
+        setTimeout(hideDecryptionProgress, 2000);
+        
     } catch (error) {
         console.error('Download failed:', error);
-        hideDecryptionProgress();
         
-        const errorContainer = document.getElementById('encryptionError');
-        if (errorContainer) {
-            errorContainer.style.display = 'block';
-            errorContainer.textContent = 'Download failed: ' + error.message;
+        // Show error
+        const encryptionError = DOM.byId('encryptionError');
+        if (encryptionError) {
+            encryptionError.style.display = 'block';
+            encryptionError.textContent = 'Download failed: ' + error.message;
         }
         
-        hideDownloadOptions();
+        hideDecryptionProgress();
     }
 }
 
-// Copy to clipboard functionality for the preview page
-function copyToClipboard() {
-    // Include the full URL with the hash fragment
+// Copy link to clipboard
+function copyLinkToClipboard() {
     const link = window.location.href;
 
-    if (!navigator.clipboard) {
-        // Fallback for browsers without clipboard API
+    // Use the modern Clipboard API first
+    if (navigator.clipboard) {
+        navigator.clipboard.writeText(link)
+            .then(() => updateCopyButton('Copied!'))
+            .catch(err => {
+                console.error('Clipboard API error:', err);
+                fallbackCopyToClipboard(link);
+            });
+        return;
+    }
+    
+    // Fallback for browsers without clipboard API
+    fallbackCopyToClipboard(link);
+}
+
+// Fallback copy method for older browsers
+function fallbackCopyToClipboard(text) {
+    try {
         const textArea = document.createElement('textarea');
-        textArea.value = link;
-        textArea.style.position = 'fixed';
-        textArea.style.left = '-999999px';
+        textArea.value = text;
+        
+        // Avoid scrolling to bottom
+        textArea.style.cssText = 'position:fixed;top:0;left:0;width:2em;height:2em;padding:0;border:none;outline:none;box-shadow:none;background:transparent;';
+        
         document.body.appendChild(textArea);
         textArea.focus();
         textArea.select();
-
-        try {
-            document.execCommand('copy');
-            updateCopyButton('Copied!');
-        } catch (err) {
-            console.error('Fallback: Could not copy text: ', err);
-        }
-
+        
+        const successful = document.execCommand('copy');
         document.body.removeChild(textArea);
-        return;
+        
+        if (successful) {
+            updateCopyButton('Copied!');
+        } else {
+            console.error('Fallback: Copy command was unsuccessful');
+            updateCopyButton('Copy failed!');
+        }
+    } catch (err) {
+        console.error('Fallback: Could not copy text:', err);
+        updateCopyButton('Copy failed!');
     }
-
-    navigator.clipboard.writeText(link)
-        .then(() => updateCopyButton('Copied!'))
-        .catch(err => console.error('Failed to copy link:', err));
 }
 
 // Update copy button text with animation
@@ -670,116 +686,125 @@ function updateCopyButton(text) {
 
 // Upload page functionality
 function initializeUploader() {
-    const dropZone = document.getElementById('dropZone');
-    const fileInput = document.getElementById('fileInput');
+    // Get DOM elements and cache them
+    const dropZone = DOM.byId('dropZone');
+    const fileInput = DOM.byId('fileInput');
 
     // If uploader elements don't exist, we're not on the upload page
     if (!dropZone || !fileInput) return;
 
-    const formFileInput = document.getElementById('formFileInput');
-    const formExpiryInput = document.getElementById('formExpiryInput');
-    const formEncryptedInput = document.getElementById('formEncryptedInput');
-    const jsExpiry = document.getElementById('jsExpiry');
-    const encryptionEnabled = document.getElementById('encryptionEnabled');
-    const uploadForm = document.getElementById('uploadForm');
-    const selectFileBtn = document.getElementById('selectFileBtn');
-    const progressContainer = document.getElementById('progressContainer');
-    const progressBar = document.getElementById('progressBar');
-    const progressText = document.getElementById('progressText');
-    const dropZoneContent = document.querySelector('.drop-zone-content');
-    const dropZoneLogo = document.querySelector('.drop-zone-logo');
-    let phrasesInterval; // For storing the interval that rotates phrases
+    // Cache elements using our DOM utility
+    const elements = {
+        formFileInput: DOM.byId('formFileInput'),
+        formExpiryInput: DOM.byId('formExpiryInput'),
+        formEncryptedInput: DOM.byId('formEncryptedInput'),
+        jsExpiry: DOM.byId('jsExpiry'),
+        encryptionEnabled: DOM.byId('encryptionEnabled'),
+        uploadForm: DOM.byId('uploadForm'),
+        selectFileBtn: DOM.byId('selectFileBtn'),
+        progressContainer: DOM.byId('progressContainer'),
+        progressBar: DOM.byId('progressBar'),
+        progressText: DOM.byId('progressText'),
+        dropZoneContent: DOM.query('.drop-zone-content'),
+        dropZoneLogo: DOM.query('.drop-zone-logo')
+    };
+    
+    // Phrase rotation interval reference
+    let phrasesInterval = null;
 
     // Check if encryption is available in this browser
     const isEncryptionSupported = FileEncryption.isEncryptionSupported();
 
     // If encryption is not supported, disable the option
-    if (!isEncryptionSupported && encryptionEnabled) {
-        encryptionEnabled.checked = false;
-        encryptionEnabled.disabled = true;
+    if (!isEncryptionSupported && elements.encryptionEnabled) {
+        elements.encryptionEnabled.checked = false;
+        elements.encryptionEnabled.disabled = true;
     }
 
-    // Fish-related processing phrases
-    const fishProcessingPhrases = [
-        "Catching your fish...",
-        "Reeling it in...",
-        "Fish on the hook!",
-        "Scaling your data...",
-        "Baiting the server...",
-        "Gone fishing for bytes...",
-        "Swimming upstream...",
-        "Something's fishy...",
-        "Diving into deep waters...",
-        "Untangling the net...",
-        "Hook, line, and syncing...",
-        "Finding Nemo...",
-        "Feeding the server sharks...",
-        "Splashing around...",
-        "Waving to the jellyfish...",
-        "Talking to the dolphins...",
-        "Exploring the deep web sea...",
-        "Fish processing in progress...",
-        "Taking the bait...",
-        "Uploading to the school of fish...",
-        "Teaching fish to code...",
-        "Consulting with the octopus...",
-        "Swimming with the data stream...",
-        "Casting the net wide...",
-        "Waiting for the fish to bite...",
-        "Checking the water temperature...",
-        "Organizing the coral reef...",
-        "Synchronizing with the tide...",
-        "Playing with the sea horses...",
-        "Diving for pearls...",
-        "Counting the fish in the sea...",
-        "Training the server fish...",
-        "Making waves in the data ocean...",
-        "Following the data current...",
-        "Checking the fish finder...",
-        "Preparing the fishing gear...",
-        "Setting up the fish trap...",
-        "Waiting for the perfect catch...",
-        "Measuring the data depth...",
-        "Navigating the data waters..."
-    ];
-
-    // Encryption-specific phrases
-    const encryptionPhrases = [
-        "Encrypting your fish...",
-        "Securing the treasure...",
-        "Putting your data in a safe...",
-        "Scrambling the message...",
-        "Building an underwater vault...",
-        "Creating a secret reef...",
-        "Generating submarine codes...",
-        "Hiding the treasure map...",
-        "Making your data invisible...",
-        "Protecting with underwater shields..."
-    ];
+    // Phrases for upload and encryption process feedback
+    const phrases = {
+        fish: [
+            "Catching your fish...",
+            "Reeling it in...",
+            "Fish on the hook!",
+            "Scaling your data...",
+            "Baiting the server...",
+            "Gone fishing for bytes...",
+            "Swimming upstream...",
+            "Something's fishy...",
+            "Diving into deep waters...",
+            "Untangling the net...",
+            "Hook, line, and syncing...",
+            "Finding Nemo...",
+            "Feeding the server sharks...",
+            "Splashing around...",
+            "Waving to the jellyfish...",
+            "Talking to the dolphins...",
+            "Exploring the deep web sea...",
+            "Fish processing in progress...",
+            "Taking the bait...",
+            "Uploading to the school of fish...",
+            "Teaching fish to code...",
+            "Consulting with the octopus...",
+            "Swimming with the data stream...",
+            "Casting the net wide...",
+            "Waiting for the fish to bite...",
+            "Checking the water temperature...",
+            "Organizing the coral reef...",
+            "Synchronizing with the tide...",
+            "Playing with the sea horses...",
+            "Diving for pearls...",
+            "Counting the fish in the sea...",
+            "Training the server fish...",
+            "Making waves in the data ocean...",
+            "Following the data current...",
+            "Checking the fish finder...",
+            "Preparing the fishing gear...",
+            "Setting up the fish trap...",
+            "Waiting for the perfect catch...",
+            "Measuring the data depth...",
+            "Navigating the data waters..."
+        ],
+        encryption: [
+            "Encrypting your fish...",
+            "Securing the treasure...",
+            "Putting your data in a safe...",
+            "Scrambling the message...",
+            "Building an underwater vault...",
+            "Creating a secret reef...",
+            "Generating submarine codes...",
+            "Hiding the treasure map...",
+            "Making your data invisible...",
+            "Protecting with underwater shields..."
+        ]
+    };
 
     // Track the last used phrase index to avoid immediate repetition
     let lastPhraseIndex = -1;
 
     // Get random fish phrase
-    function getRandomFishPhrase() {
+    function getRandomPhrase(phraseArray, prefix = "") {
         let randomIndex;
         do {
-            randomIndex = Math.floor(Math.random() * fishProcessingPhrases.length);
-        } while (randomIndex === lastPhraseIndex && fishProcessingPhrases.length > 1);
+            randomIndex = Math.floor(Math.random() * phraseArray.length);
+        } while (randomIndex === lastPhraseIndex && phraseArray.length > 1);
 
         lastPhraseIndex = randomIndex;
-        return "90% - " + fishProcessingPhrases[randomIndex];
+        return prefix + phraseArray[randomIndex];
+    }
+    
+    // Simplified access to phrase arrays
+    function getRandomFishPhrase() {
+        return "90% - " + getRandomPhrase(phrases.fish);
     }
 
-    // Get random encryption phrase
     function getRandomEncryptionPhrase() {
-        let randomIndex = Math.floor(Math.random() * encryptionPhrases.length);
-        return encryptionPhrases[randomIndex];
+        return getRandomPhrase(phrases.encryption);
     }
 
     // Get max file size from the UI
     function getMaxFileSize() {
-        const infoElement = document.querySelector('.info strong');
+        const infoElement = DOM.query('.info strong');
         if (!infoElement) return 1024; // Default to 1GB
 
         const sizeText = infoElement.innerText;
@@ -792,7 +817,7 @@ function initializeUploader() {
     const maxSizeBytes = maxSizeMB * 1024 * 1024; // Convert to bytes
 
     // Event listeners
-    selectFileBtn.addEventListener('click', () => fileInput.click());
+    elements.selectFileBtn.addEventListener('click', () => fileInput.click());
     fileInput.addEventListener('change', handleFileSelection);
 
     // Setup drag and drop
@@ -842,8 +867,8 @@ function initializeUploader() {
         
         // Create a separate copy of the logo at the top
         let uploadingLogo = document.querySelector('.uploading-logo');
-        if (!uploadingLogo && dropZoneLogo) {
-            uploadingLogo = dropZoneLogo.cloneNode(true);
+        if (!uploadingLogo && elements.dropZoneLogo) {
+            uploadingLogo = elements.dropZoneLogo.cloneNode(true);
             uploadingLogo.classList.add('uploading-logo');
             uploadingLogo.style.position = 'absolute';
             uploadingLogo.style.top = '50px';
@@ -853,21 +878,21 @@ function initializeUploader() {
         }
         
         // Hide the select file button
-        if (selectFileBtn) {
-            selectFileBtn.style.display = 'none';
+        if (elements.selectFileBtn) {
+            elements.selectFileBtn.style.display = 'none';
         }
         
         // Hide drop zone content
-        if (dropZoneContent) {
-            dropZoneContent.style.opacity = '0';
-            dropZoneContent.style.pointerEvents = 'none';
-            dropZoneContent.style.position = 'absolute';
+        if (elements.dropZoneContent) {
+            elements.dropZoneContent.style.opacity = '0';
+            elements.dropZoneContent.style.pointerEvents = 'none';
+            elements.dropZoneContent.style.position = 'absolute';
         }
         
         // Show and position progress container inside drop zone
-        progressContainer.style.display = 'block';
-        if (!dropZone.contains(progressContainer)) {
-            dropZone.appendChild(progressContainer);
+        elements.progressContainer.style.display = 'block';
+        if (!dropZone.contains(elements.progressContainer)) {
+            dropZone.appendChild(elements.progressContainer);
         }
         
         // Add uploading class to dropzone
@@ -883,27 +908,27 @@ function initializeUploader() {
         }
 
         // Reset progress bar
-        progressBar.style.backgroundColor = '#4CAF50';
-        progressBar.style.width = '0%';
-        progressText.textContent = '0%';
+        elements.progressBar.style.backgroundColor = '#4CAF50';
+        elements.progressBar.style.width = '0%';
+        elements.progressText.textContent = '0%';
 
         // Set and validate the expiry option
-        const expiryValue = jsExpiry.value;
+        const expiryValue = elements.jsExpiry.value;
         const validExpiryValues = ["1h", "6h", "24h", "72h"];
 
         if (validExpiryValues.includes(expiryValue)) {
-            formExpiryInput.value = expiryValue;
+            elements.formExpiryInput.value = expiryValue;
         } else {
             console.warn(`Invalid expiry value: ${expiryValue}, using default`);
-            formExpiryInput.value = "1h"; // Default to 1 hour if invalid
+            elements.formExpiryInput.value = "1h"; // Default to 1 hour if invalid
         }
 
         // Check if encryption is enabled and supported
-        const shouldEncrypt = encryptionEnabled &&
-            encryptionEnabled.checked &&
+        const shouldEncrypt = elements.encryptionEnabled &&
+            elements.encryptionEnabled.checked &&
             isEncryptionSupported;
 
-        formEncryptedInput.value = shouldEncrypt ? "true" : "false";
+        elements.formEncryptedInput.value = shouldEncrypt ? "true" : "false";
 
         if (shouldEncrypt) {
             // Update progress to show encryption state
@@ -940,18 +965,18 @@ function initializeUploader() {
         }
         
         // Show the select file button again
-        if (selectFileBtn) {
-            selectFileBtn.style.display = '';
+        if (elements.selectFileBtn) {
+            elements.selectFileBtn.style.display = '';
         }
         
         // Remove uploading-active class from body to stop bubble animation
         document.body.classList.remove('uploading-active');
         
         // Show drop zone content again
-        if (dropZoneContent) {
-            dropZoneContent.style.opacity = '1';
-            dropZoneContent.style.pointerEvents = 'auto';
-            dropZoneContent.style.position = '';
+        if (elements.dropZoneContent) {
+            elements.dropZoneContent.style.opacity = '1';
+            elements.dropZoneContent.style.pointerEvents = 'auto';
+            elements.dropZoneContent.style.position = '';
         }
         
         // Show form options again
@@ -1011,7 +1036,7 @@ function initializeUploader() {
             sampleInput.type = 'hidden';
             sampleInput.name = 'encrypted_sample';
             sampleInput.value = sampleBase64;
-            uploadForm.appendChild(sampleInput);
+            elements.uploadForm.appendChild(sampleInput);
 
             // Create a File object from the encrypted blob
             const encryptedFile = new File([encryptedBlob], file.name, {
@@ -1022,7 +1047,7 @@ function initializeUploader() {
             // Copy the encrypted file to the form's file input
             const dataTransfer = new DataTransfer();
             dataTransfer.items.add(encryptedFile);
-            formFileInput.files = dataTransfer.files;
+            elements.formFileInput.files = dataTransfer.files;
 
             // Send the upload request
             await sendUploadRequest(encryptionKey);
@@ -1037,7 +1062,7 @@ function initializeUploader() {
         // Copy the selected file to the form's file input
         const dataTransfer = new DataTransfer();
         dataTransfer.items.add(file);
-        formFileInput.files = dataTransfer.files;
+        elements.formFileInput.files = dataTransfer.files;
 
         // Send the upload request
         sendUploadRequest();
@@ -1046,7 +1071,7 @@ function initializeUploader() {
     // Send the upload request with progress tracking
     async function sendUploadRequest(encryptionKey = null) {
         try {
-            const formData = new FormData(uploadForm);
+            const formData = new FormData(elements.uploadForm);
             ensureCsrfToken(formData);
             
             // Create controller for aborting fetch request on timeout
@@ -1060,7 +1085,7 @@ function initializeUploader() {
             }, 3600000);
             
             // Set up progress tracking
-            const fileSize = formFileInput.files[0].size;
+            const fileSize = elements.formFileInput.files[0].size;
             let uploadComplete = false;
             let uploadStartTime = Date.now();
             let lastProgressUpdate = uploadStartTime;
@@ -1089,22 +1114,22 @@ function initializeUploader() {
                         
                         // Show fish phrases throughout the entire upload process
                         if (!phrasesInterval) {
-                            updateProgress(percent, percent + "% - " + fishProcessingPhrases[Math.floor(Math.random() * fishProcessingPhrases.length)]);
+                            updateProgress(percent, percent + "% - " + getRandomFishPhrase());
                             
                             // Start rotating phrases every 5 seconds
                             phrasesInterval = setInterval(function() {
                                 const currentPercent = Math.min(Math.round((bytesUploaded / fileSize) * 100), 99);
-                                progressText.textContent = currentPercent + "% - " + fishProcessingPhrases[Math.floor(Math.random() * fishProcessingPhrases.length)];
+                                elements.progressText.textContent = currentPercent + "% - " + getRandomFishPhrase();
                             }, 5000);
                         } else {
                             // Just update the percentage number in the existing phrase
-                            const currentText = progressText.textContent;
+                            const currentText = elements.progressText.textContent;
                             const newText = percent + "%" + currentText.substring(currentText.indexOf("%") + 1);
-                            progressText.textContent = newText;
+                            elements.progressText.textContent = newText;
                         }
                         
                         // Still update the progress bar
-                        progressBar.style.width = percent + '%';
+                        elements.progressBar.style.width = percent + '%';
                         
                         lastProgressUpdate = now;
                     }
@@ -1196,11 +1221,11 @@ function initializeUploader() {
         }
 
         // Apply transition for smoother animation
-        progressBar.style.transition = 'width 0.3s ease-in-out';
+        elements.progressBar.style.transition = 'width 0.3s ease-in-out';
         
         // Update progress bar width if percent is provided
         if (percent !== null) {
-            progressBar.style.width = percent + '%';
+            elements.progressBar.style.width = percent + '%';
         }
 
         // Clear any existing phrase rotation interval if we're setting new text
@@ -1212,25 +1237,25 @@ function initializeUploader() {
 
         // Update text with custom message or percentage
         if (text) {
-            progressText.textContent = text;
+            elements.progressText.textContent = text;
         } else {
             // For regular progress, show fish phrases throughout
-            const randomFishPhrase = fishProcessingPhrases[Math.floor(Math.random() * fishProcessingPhrases.length)];
+            const randomFishPhrase = getRandomFishPhrase();
             
             if (percent < 100) {
                 // Start rotating phrases immediately
-                progressText.textContent = percent + "% - " + randomFishPhrase;
+                elements.progressText.textContent = percent + "% - " + randomFishPhrase;
                 
                 if (!phrasesInterval) {
                     // Start rotating phrases every 5 seconds
                     phrasesInterval = setInterval(function() {
-                        const currentPercent = parseInt(progressBar.style.width) || percent;
-                        const newPhrase = fishProcessingPhrases[Math.floor(Math.random() * fishProcessingPhrases.length)];
-                        progressText.textContent = currentPercent + "% - " + newPhrase;
+                        const currentPercent = parseInt(elements.progressBar.style.width) || percent;
+                        const newPhrase = getRandomFishPhrase();
+                        elements.progressText.textContent = currentPercent + "% - " + newPhrase;
                     }, 5000);
                 }
             } else {
-                progressText.textContent = percent + '% - Complete!';
+                elements.progressText.textContent = percent + '% - Complete!';
                 
                 // Stop phrase rotation at 100%
                 if (phrasesInterval) {
@@ -1242,7 +1267,7 @@ function initializeUploader() {
 
         // Update color based on state
         if (percent === 100) {
-            progressBar.style.backgroundColor = '#27ae60'; // Darker green for completion
+            elements.progressBar.style.backgroundColor = '#27ae60'; // Darker green for completion
         }
     }
 
@@ -1271,7 +1296,7 @@ function initializeUploader() {
         }
         
         // Hide the progress container
-        progressContainer.style.display = 'none';
+        elements.progressContainer.style.display = 'none';
     }
 }
 
@@ -1286,19 +1311,19 @@ function formatFileSize(bytes) {
 // Update the preview with decrypted content
 function updatePreview(objectURL, mimeType) {
     if (mimeType.startsWith('image/')) {
-        const img = document.getElementById('previewImage');
+        const img = DOM.byId('previewImage');
         if (img) img.src = objectURL;
     } else if (mimeType.startsWith('video/')) {
-        const source = document.getElementById('previewVideoSource');
+        const source = DOM.byId('previewVideoSource');
         if (source) {
             source.src = objectURL;
-            document.getElementById('previewVideo').load();
+            DOM.byId('previewVideo').load();
         }
     } else if (mimeType.startsWith('audio/')) {
-        const source = document.getElementById('previewAudioSource');
+        const source = DOM.byId('previewAudioSource');
         if (source) {
             source.src = objectURL;
-            document.getElementById('previewAudio').load();
+            DOM.byId('previewAudio').load();
         }
     }
 }

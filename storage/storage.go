@@ -2,6 +2,7 @@ package storage
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"sync"
 	"time"
@@ -40,11 +41,14 @@ type Storage struct {
 // New creates a new storage instance
 func New(cfg *config.Config, logger Logger) (*Storage, error) {
 	// Ensure the data directory exists
-	if err := os.MkdirAll(cfg.BitcaskPath, 0755); err != nil {
+	if err := os.MkdirAll(cfg.BitcaskPath, 0750); err != nil {
 		return nil, fmt.Errorf("failed to create data directory: %w", err)
 	}
 
 	// Calculate max value size based on max upload size plus some overhead for compression
+	if cfg.MaxUploadSize > math.MaxInt64-1024*1024 {
+		return nil, fmt.Errorf("max upload size is too large, would cause overflow")
+	}
 	maxValueSize := uint64(cfg.MaxUploadSize + 1024*1024) // Add 1MB for overhead
 
 	// Open the BitCask database with increased max value size

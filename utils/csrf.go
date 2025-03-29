@@ -218,3 +218,29 @@ func (c *CSRFProtection) Middleware(next http.Handler) http.Handler {
 		http.Error(w, "Invalid or missing CSRF token", http.StatusForbidden)
 	})
 }
+
+// GenerateRandomString creates a random string of specified length
+// Useful for generating nonces and other security tokens
+func GenerateRandomString(length int) string {
+	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	b := make([]byte, length)
+	_, err := rand.Read(b)
+	if err != nil {
+		// If we can't get random data, use timestamp as fallback
+		// This should never happen in practice
+		timestamp := []byte(time.Now().String())
+		copy(b, timestamp)
+		if len(timestamp) < length {
+			for i := len(timestamp); i < length; i++ {
+				b[i] = charset[i%len(charset)]
+			}
+		}
+		return string(b[:length])
+	}
+
+	// Convert random bytes to characters from charset
+	for i := range b {
+		b[i] = charset[int(b[i])%len(charset)]
+	}
+	return string(b)
+}
