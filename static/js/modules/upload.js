@@ -522,25 +522,12 @@ function initializeUploader() {
                     lastModified: file.lastModified
                 });
 
-                // Check if we should use chunked upload
-                if (encryptedFile.size > 10 * 1024 * 1024) { // Use chunked upload for files over 10MB
-                    updateProgress(70, "File encryption complete! Starting chunked upload...");
-                    
-                    // Add the encrypted sample to the chunked upload instead of form
-                    await sendChunkedUpload(encryptedFile, encryptionKey, sampleBase64);
-                } else {
-                    // For smaller files, use regular upload
-                    // Copy the encrypted file to the form's file input
-                    const dataTransfer = new DataTransfer();
-                    dataTransfer.items.add(encryptedFile);
-                    elements.formFileInput.files = dataTransfer.files;
-
-                    // Update progress
-                    updateProgress(70, "File encryption complete! Preparing upload...");
-
-                    // Send the upload request
-                    await sendUploadRequest(encryptionKey);
-                }
+                // Always use chunked upload for encrypted files
+                updateProgress(70, "File encryption complete! Starting chunked upload...");
+                
+                // Add the encrypted sample to the chunked upload
+                await sendChunkedUpload(encryptedFile, encryptionKey, sampleBase64);
+                
             } catch (encryptionError) {
                 console.error('Encryption operation failed:', encryptionError);
                 throw new Error('Failed to encrypt file: ' + encryptionError.message);
@@ -564,25 +551,60 @@ function initializeUploader() {
 
     // Process regular, unencrypted upload
     function processRegularUpload(file) {
-        // Copy the selected file to the form's file input
-        const dataTransfer = new DataTransfer();
-        dataTransfer.items.add(file);
-        elements.formFileInput.files = dataTransfer.files;
-
-        // Send the upload request
-        sendUploadRequest();
+        // Always use chunked upload for better progress reporting
+        sendChunkedUpload(file);
     }
 
     // Constants for chunked upload
-    const CHUNK_SIZE = 50 * 1024 * 1024; // 50MB chunks for faster uploads on local/fast networks
+    const MAX_CHUNK_SIZE = 80 * 1024 * 1024; // 80MB absolute maximum chunk size
+    const MIN_CHUNK_SIZE = 1 * 1024 * 1024;  // 1MB minimum chunk size
+    const IDEAL_CHUNK_COUNT = 10;            // Aim for at least this many chunks for better progress reporting
     const MAX_RETRIES = 3;
+    
+    // Determine optimal chunk size based on file size
+    function getOptimalChunkSize(fileSize) {
+        // Always try to have at least IDEAL_CHUNK_COUNT chunks for a better progress experience
+        const chunkSizeForIdealCount = Math.ceil(fileSize / IDEAL_CHUNK_COUNT);
+        
+        // Adjust based on file size categories
+        if (fileSize < 10 * 1024 * 1024) { // Less than 10MB
+            // For very small files, use smaller chunks but ensure at least 5 chunks
+            return Math.min(
+                Math.max(MIN_CHUNK_SIZE, chunkSizeForIdealCount),
+                Math.ceil(fileSize / 5)
+            );
+        } 
+        
+        if (fileSize < 100 * 1024 * 1024) { // 10MB - 100MB
+            // For small files, ensure at least IDEAL_CHUNK_COUNT chunks
+            return Math.min(
+                Math.max(MIN_CHUNK_SIZE, chunkSizeForIdealCount),
+                10 * 1024 * 1024 // Cap at 10MB per chunk for small files
+            );
+        }
+        
+        if (fileSize < 1024 * 1024 * 1024) { // 100MB - 1GB
+            // For medium files, aim for chunks of 5-20MB
+            return Math.min(
+                Math.max(5 * 1024 * 1024, chunkSizeForIdealCount),
+                20 * 1024 * 1024
+            );
+        }
+        
+        // For large files (over 1GB), use larger chunks but ensure we don't exceed MAX_CHUNK_SIZE
+        return Math.min(
+            Math.max(10 * 1024 * 1024, fileSize / IDEAL_CHUNK_COUNT), 
+            MAX_CHUNK_SIZE
+        );
+    }
     
     // Send the file in chunks
     async function sendChunkedUpload(file, encryptionKey = null, sampleBase64 = null) {
         // Prepare for chunked upload
         const fileSize = file.size;
         const fileId = crypto.randomUUID(); // Generate a unique ID for this upload
-        const totalChunks = Math.ceil(fileSize / CHUNK_SIZE);
+        const chunkSize = getOptimalChunkSize(fileSize); // Dynamic chunk size
+        const totalChunks = Math.ceil(fileSize / chunkSize);
         let currentChunk = 0;
         let bytesUploaded = 0;
         let uploadStartTime = Date.now();
@@ -598,8 +620,8 @@ function initializeUploader() {
         
         // Helper function to upload a single chunk
         async function uploadChunk(chunkIndex, retryCount = 0) {
-            const start = chunkIndex * CHUNK_SIZE;
-            const end = Math.min(start + CHUNK_SIZE, fileSize);
+            const start = chunkIndex * chunkSize;
+            const end = Math.min(start + chunkSize, fileSize);
             const chunk = file.slice(start, end);
             
             const formData = new FormData();
@@ -830,165 +852,9 @@ function initializeUploader() {
 
     // Send the upload request with progress tracking
     async function sendUploadRequest(encryptionKey = null) {
-        // Check if we should use chunked upload
         const file = elements.formFileInput.files[0];
-        if (file && file.size > 10 * 1024 * 1024) { // Use chunked upload for files over 10MB
-            return sendChunkedUpload(file, encryptionKey);
-        }
-        
-        let xhr = null;
-        let timeoutId = null;
-        
-        try {
-            // Validate form data
-            if (!elements.formFileInput.files || !elements.formFileInput.files.length) {
-                throw new Error('No file selected for upload');
-            }
-            
-            const formData = new FormData(elements.uploadForm);
-            ensureCsrfToken(formData);
-            
-            // Create controller for aborting fetch request on timeout
-            const controller = new AbortController();
-            const signal = controller.signal;
-            
-            // Set timeout to 1 hour (3600000ms) for very large uploads
-            timeoutId = setTimeout(() => {
-                controller.abort();
-                showError('Upload timed out. Please try with a smaller file or check your connection.');
-            }, 3600000);
-            
-            // Set up progress tracking
-            const fileSize = elements.formFileInput.files[0].size;
-            
-            let uploadComplete = false;
-            let uploadStartTime = Date.now();
-            let lastProgressUpdate = uploadStartTime;
-            let bytesUploaded = 0;
-            
-            // Use XMLHttpRequest for accurate progress tracking
-            xhr = new XMLHttpRequest();
-            xhr.open('POST', '/upload', true);
-            xhr.timeout = 3600000; // 1 hour timeout
-            
-            // Set up proper CSRF token
-            const csrfToken = document.getElementById('formCsrfToken')?.value;
-            if (csrfToken) {
-                xhr.setRequestHeader('X-CSRF-Token', csrfToken);
-            }
-            
-            // Track upload progress accurately
-            xhr.upload.onprogress = function(event) {
-                if (event.lengthComputable) {
-                    bytesUploaded = event.loaded;
-                    const now = Date.now();
-                    
-                    // Only update progress every 200ms to avoid too many UI updates
-                    if (now - lastProgressUpdate > 200) {
-                        const percent = Math.min(Math.round((bytesUploaded / fileSize) * 100), 99);
-                        const elapsedSeconds = (now - uploadStartTime) / 1000;
-                        const bytesPerSecond = bytesUploaded / elapsedSeconds;
-                        
-                        // Log upload speed for debugging
-                        if (now - uploadStartTime > 5000) { // After 5 seconds, show speed
-                        }
-                        
-                        // Show fish phrases throughout the entire upload process
-                        if (!phrasesInterval) {
-                            updateProgress(percent, percent + "% - " + getRandomFishPhrase());
-                            
-                            // Start rotating phrases every 5 seconds
-                            phrasesInterval = setInterval(function() {
-                                const currentPercent = Math.min(Math.round((bytesUploaded / fileSize) * 100), 99);
-                                elements.progressText.textContent = currentPercent + "% - " + getRandomFishPhrase();
-                            }, 5000);
-                        } else {
-                            // Just update the percentage number in the existing phrase
-                            const currentText = elements.progressText.textContent;
-                            const dashIndex = currentText.indexOf("% -");
-                            if (dashIndex >= 0) {
-                                const newText = percent + currentText.substring(dashIndex);
-                                elements.progressText.textContent = newText;
-                            } else {
-                                // Fallback if dash not found
-                                elements.progressText.textContent = percent + "% - " + getRandomFishPhrase();
-                            }
-                        }
-                        
-                        // Still update the progress bar
-                        elements.progressBar.style.width = percent + '%';
-                        
-                        lastProgressUpdate = now;
-                    }
-                }
-            };
-            
-            // Handle upload completion
-            xhr.onload = function() {
-                uploadComplete = true;
-                
-                // Clear the timeout since request completed
-                if (timeoutId) {
-                    clearTimeout(timeoutId);
-                    timeoutId = null;
-                }
-                
-                if (xhr.status >= 200 && xhr.status < 300) {
-                    // Success handling
-                    updateProgress(100, '100% - Complete!');
-                    
-                    // Add a small delay before redirect to show the completion
-                    setTimeout(() => {
-                        // Redirect with encryption key if needed
-                        if (encryptionKey) {
-                            const redirectUrl = xhr.responseURL || '/';
-                            window.location.href = redirectUrl + '#' + encryptionKey;
-                        } else {
-                            window.location.href = xhr.responseURL || '/';
-                        }
-                    }, 500);
-                } else {
-                    // Error handling - parse error from response
-                    const errorMessage = parseErrorMessageFromHTML(xhr.responseText) || 
-                                      `Upload failed! Server returned status ${xhr.status}`;
-                    console.error('Upload error:', errorMessage);
-                    showError(errorMessage);
-                }
-            };
-            
-            // Handle network errors
-            xhr.onerror = function() {
-                if (timeoutId) {
-                    clearTimeout(timeoutId);
-                    timeoutId = null;
-                }
-                console.error('XHR error during upload');
-                showError('Network error during upload. Please check your connection and try again.');
-            };
-            
-            // Handle timeout
-            xhr.ontimeout = function() {
-                console.error('XHR timeout during upload');
-                showError('Upload timed out. Please try with a smaller file or check your connection.');
-            };
-            
-            // Send the form data
-            xhr.send(formData);
-            
-        } catch (error) {
-            console.error('Upload preparation error:', error);
-            
-            // Clean up any pending requests or timeouts
-            if (timeoutId) {
-                clearTimeout(timeoutId);
-            }
-            
-            if (xhr && xhr.readyState !== 4) {
-                xhr.abort();
-            }
-            
-            showError('Failed to prepare upload: ' + error.message);
-        }
+        // Always use chunked upload for all files
+        return sendChunkedUpload(file, encryptionKey);
     }
     
     // Parse error message from HTML response

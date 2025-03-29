@@ -682,8 +682,9 @@ func (h *Handler) renderTemplate(w http.ResponseWriter, r *http.Request, templat
 
 // ChunkUpload handles individual chunk uploads in a chunked file upload process
 func (h *Handler) ChunkUpload(w http.ResponseWriter, r *http.Request) {
-	// Set a much larger chunk size limit for faster uploads
-	chunkSizeLimit := int64(55 * 1024 * 1024) // 55MB limit to accommodate 50MB chunks with overhead
+	// Set a much larger chunk size limit to accommodate dynamic chunk sizing
+	// 85MB limit allows for 80MB chunks plus form overhead
+	chunkSizeLimit := int64(85 * 1024 * 1024)
 	r.Body = http.MaxBytesReader(w, r.Body, chunkSizeLimit)
 
 	// Parse the multipart form with chunk size limit
