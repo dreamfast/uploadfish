@@ -211,6 +211,25 @@ func (h *Handler) processUploadedFile(file io.ReadSeeker, handler *multipart.Fil
 		LogInfo("File is encrypted client-side", nil)
 	}
 
+	// Get encrypted sample if available
+	var encryptedSample []byte
+	if isEncrypted {
+		sampleBase64 := r.FormValue("encrypted_sample")
+		if sampleBase64 != "" {
+			// Decode base64 to bytes
+			var err error
+			encryptedSample, err = utils.Base64Decode(sampleBase64)
+			if err != nil {
+				LogError(err, "Error decoding encrypted sample", nil)
+				// Continue without sample, not critical
+			} else {
+				LogInfo("Received encrypted sample for validation", map[string]interface{}{
+					"sample_size": len(encryptedSample),
+				})
+			}
+		}
+	}
+
 	// Create a buffer to store the header of the file
 	buffer := make([]byte, 512)
 	if _, err := file.Read(buffer); err != nil {
@@ -248,16 +267,16 @@ func (h *Handler) processUploadedFile(file io.ReadSeeker, handler *multipart.Fil
 		return nil, fmt.Errorf("error reading file: %v", err)
 	}
 
-	// Create file metadata
 	return &models.File{
-		ID:          fileID,
-		Filename:    sanitizeFilename(handler.Filename),
-		MimeType:    contentType,
-		Size:        int64(len(content)),
-		UploadTime:  time.Now(),
-		ExpiryTime:  expiryTime,
-		Content:     content,
-		IsEncrypted: isEncrypted,
+		ID:              fileID,
+		Filename:        sanitizeFilename(handler.Filename),
+		MimeType:        contentType,
+		Size:            int64(len(content)),
+		UploadTime:      time.Now(),
+		ExpiryTime:      expiryTime,
+		Content:         content,
+		IsEncrypted:     isEncrypted,
+		EncryptedSample: encryptedSample,
 	}, nil
 }
 
@@ -346,7 +365,8 @@ func serveFileContent(w http.ResponseWriter, r *http.Request, storage *storage.S
 	}
 
 	// Add cache control headers for better performance
-	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Pragma", "no-cache")
 
 	// Set content type if we know it
 	if fileMetadata.MimeType != "" {
@@ -366,62 +386,6 @@ func serveFileContent(w http.ResponseWriter, r *http.Request, storage *storage.S
 		w.Header().Set("Content-Disposition", fmt.Sprintf("inline; filename=\"%s\"", fileMetadata.Filename))
 	}
 
-	// Indicate support for range requests
-	w.Header().Set("Accept-Ranges", "bytes")
-
-	// Parse Range header to support partial content requests
-	rangeHeader := r.Header.Get("Range")
-	if rangeHeader != "" {
-		// Range request handling
-		fileSize := int64(len(content))
-
-		// Parse the range header
-		ranges, err := parseRange(rangeHeader, fileSize)
-		if err != nil {
-			// If range parsing fails, return 416 Range Not Satisfiable
-			w.Header().Set("Content-Range", fmt.Sprintf("bytes */%d", fileSize))
-			http.Error(w, "Range Not Satisfiable", http.StatusRequestedRangeNotSatisfiable)
-			return
-		}
-
-		// We only support a single range for now
-		if len(ranges) > 1 {
-			// If multiple ranges, just serve the entire content
-			w.Header().Set("Content-Length", strconv.FormatInt(fileSize, 10))
-			w.Write(content)
-			return
-		}
-
-		// Get the first (and only) range
-		rng := ranges[0]
-
-		// Special handling for encrypted files
-		// If this file is encrypted, the first 12 bytes are the IV
-		// For proper decryption testing, we need to ensure we send at least IV + some data
-		if fileMetadata.IsEncrypted && rng.start == 0 && rng.end < 20 {
-			// Extend the range to include at least 20 bytes (IV + some data)
-			if fileSize > 20 {
-				rng.end = 20
-			} else {
-				rng.end = fileSize - 1
-			}
-		}
-
-		// Set partial content status code
-		w.WriteHeader(http.StatusPartialContent)
-
-		// Set Content-Range header
-		w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", rng.start, rng.end, fileSize))
-
-		// Set Content-Length header for the range
-		w.Header().Set("Content-Length", strconv.FormatInt(rng.end-rng.start+1, 10))
-
-		// Write only the requested portion
-		w.Write(content[rng.start : rng.end+1])
-		return
-	}
-
-	// If no range header, serve the entire content
 	// Set content length
 	w.Header().Set("Content-Length", strconv.FormatInt(fileMetadata.Size, 10))
 
@@ -433,83 +397,6 @@ func serveFileContent(w http.ResponseWriter, r *http.Request, storage *storage.S
 			"size":    fileMetadata.Size,
 		})
 	}
-}
-
-// Define a struct for byte ranges
-type httpRange struct {
-	start, end int64
-}
-
-// Parse Range header string into a slice of ranges
-func parseRange(rangeHeader string, fileSize int64) ([]httpRange, error) {
-	// Remove "bytes=" prefix
-	if !strings.HasPrefix(rangeHeader, "bytes=") {
-		return nil, fmt.Errorf("invalid range header format")
-	}
-	rangeHeader = strings.TrimPrefix(rangeHeader, "bytes=")
-
-	// Split ranges by comma (multiple ranges)
-	rangeSpecs := strings.Split(rangeHeader, ",")
-	ranges := make([]httpRange, 0, len(rangeSpecs))
-
-	for _, rangeSpec := range rangeSpecs {
-		rangeSpec = strings.TrimSpace(rangeSpec)
-		if rangeSpec == "" {
-			continue
-		}
-
-		// Split range by hyphen
-		parts := strings.Split(rangeSpec, "-")
-		if len(parts) != 2 {
-			return nil, fmt.Errorf("invalid range format")
-		}
-
-		var rng httpRange
-
-		// Parse start of range
-		if parts[0] == "" {
-			// If no start specified, it's a suffix range (e.g., -500 means last 500 bytes)
-			suffixLength, err := strconv.ParseInt(parts[1], 10, 64)
-			if err != nil || suffixLength <= 0 {
-				return nil, fmt.Errorf("invalid suffix length")
-			}
-			rng.start = fileSize - suffixLength
-			if rng.start < 0 {
-				rng.start = 0
-			}
-			rng.end = fileSize - 1
-		} else {
-			// Parse explicit start position
-			start, err := strconv.ParseInt(parts[0], 10, 64)
-			if err != nil || start < 0 {
-				return nil, fmt.Errorf("invalid range start")
-			}
-
-			// If end is specified
-			if parts[1] != "" {
-				end, err := strconv.ParseInt(parts[1], 10, 64)
-				if err != nil || end < start || end >= fileSize {
-					return nil, fmt.Errorf("invalid range end")
-				}
-				rng.end = end
-			} else {
-				// If no end specified, set to end of file
-				rng.end = fileSize - 1
-			}
-
-			rng.start = start
-		}
-
-		// Validate range
-		if rng.start >= fileSize {
-			return nil, fmt.Errorf("range start exceeds file size")
-		}
-
-		// Add valid range to result
-		ranges = append(ranges, rng)
-	}
-
-	return ranges, nil
 }
 
 // Helper function to serve the preview page
@@ -747,4 +634,58 @@ func (h *Handler) Privacy(w http.ResponseWriter, r *http.Request) {
 			"template": "privacy.html",
 		})
 	}
+}
+
+// ServeEncryptedSample serves just the encrypted sample for key validation
+func (h *Handler) ServeEncryptedSample(w http.ResponseWriter, r *http.Request) {
+	// Extract file ID from URL
+	fileID := chi.URLParam(r, "fileID")
+
+	LogInfo("Serving encrypted sample requested", map[string]interface{}{
+		"file_id": fileID,
+		"path":    r.URL.Path,
+		"query":   r.URL.RawQuery,
+	})
+
+	// Get file metadata
+	fileMetadata, err := h.Storage.GetFile(fileID)
+	if err != nil {
+		LogError(err, "File not found when requesting sample", map[string]interface{}{
+			"file_id": fileID,
+		})
+		h.renderError(w, fmt.Sprintf("File not found or expired"), http.StatusNotFound)
+		return
+	}
+
+	// Check if file is encrypted and has a sample
+	if !fileMetadata.IsEncrypted || len(fileMetadata.EncryptedSample) == 0 {
+		LogInfo("Sample not available", map[string]interface{}{
+			"file_id":      fileID,
+			"is_encrypted": fileMetadata.IsEncrypted,
+			"sample_size":  len(fileMetadata.EncryptedSample),
+		})
+		h.renderError(w, fmt.Sprintf("No encryption sample available for this file"), http.StatusNotFound)
+		return
+	}
+
+	// Set appropriate headers
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s.sample", fileMetadata.Filename))
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(fileMetadata.EncryptedSample)))
+
+	// Serve the sample data
+	if _, err := w.Write(fileMetadata.EncryptedSample); err != nil {
+		LogError(err, "Error writing sample data to response", map[string]interface{}{
+			"file_id": fileID,
+		})
+		// Error already happened during write, so we can't send an error response
+		return
+	}
+
+	LogInfo("Served encrypted sample successfully", map[string]interface{}{
+		"file_id":     fileID,
+		"sample_size": len(fileMetadata.EncryptedSample),
+	})
 }

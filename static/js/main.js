@@ -71,6 +71,7 @@ class FileEncryption {
         try {
             // Check if encryptedData is available and has sufficient length
             if (!encryptedData || encryptedData.byteLength < 13) {
+                console.error(`Encrypted data is invalid - size: ${encryptedData ? encryptedData.byteLength : 'undefined'} bytes`);
                 throw new Error(`Encrypted data is invalid (size: ${encryptedData ? encryptedData.byteLength : 'undefined'} bytes)`);
             }
 
@@ -79,12 +80,18 @@ class FileEncryption {
 
             // Extract the IV from the beginning of the data (first 12 bytes)
             const iv = new Uint8Array(encryptedData.slice(0, 12));
+            console.log("IV bytes:", Array.from(iv).slice(0, 5), "...");
 
             // Extract the encrypted content (everything after the IV)
             const encryptedContent = new Uint8Array(encryptedData.slice(12));
             
             // Log the data we're working with
+            console.log("Decrypting data - total size:", encryptedData.byteLength, 
+                        "bytes, IV size:", iv.length, 
+                        "bytes, content size:", encryptedContent.length, "bytes");
+            
             if (encryptedContent.length < 1) {
+                console.error("No encrypted content found after IV");
                 throw new Error("No encrypted content found after IV");
             }
 
@@ -103,6 +110,8 @@ class FileEncryption {
                 key,
                 encryptedContent
             );
+
+            console.log("Decryption successful, decrypted size:", decryptedContent.byteLength, "bytes");
 
             // Return as a Blob with original file type
             return new Blob([decryptedContent], {type: fileType});
@@ -275,25 +284,99 @@ function handleEncryptedPreview() {
                 downloadSection.style.display = 'flex';
             }
             // Insert this message before the download button
+
+            // Update download button to include the key in the URL
+            const downloadBtn = document.getElementById('downloadBtn');
+            if (downloadBtn) {
+                const currentHref = downloadBtn.getAttribute('href');
+                downloadBtn.setAttribute('href', currentHref + '#' + encryptionKey);
+
+                // For direct downloads, we need to handle it with JS
+                downloadBtn.addEventListener('click', function (e) {
+                    e.preventDefault();
+                    handleEncryptedDownload(encryptionKey, fileURL, mimeType, filename);
+                });
+            }
+
+            // Immediately validate the sample when the page loads
+            validateEncryptionSample(encryptionKey, fileURL, mimeType, filename);
         } else {
             // Invalid key format
             document.getElementById('encryptionError').style.display = 'block';
             document.getElementById('encryptionError').textContent = 'Invalid encryption key format. The link may be incomplete or incorrect.';
             hideDownloadOptions();
         }
+    }
+}
 
-        // Update download button to include the key in the URL
-        const downloadBtn = document.getElementById('downloadBtn');
-        if (downloadBtn && encryptionKey) {
-            const currentHref = downloadBtn.getAttribute('href');
-            downloadBtn.setAttribute('href', currentHref + '#' + encryptionKey);
-
-            // For direct downloads, we need to handle it with JS
-            downloadBtn.addEventListener('click', function (e) {
-                e.preventDefault();
-                handleEncryptedDownload(encryptionKey, fileURL, mimeType, filename);
-            });
+/**
+ * Validate encryption key by decrypting a sample before showing download options.
+ * This ensures that we don't allow downloads with invalid keys.
+ */
+async function validateEncryptionSample(key, fileURL, mimeType, filename) {
+    try {
+        // Show progress indicator
+        const progressContainer = document.getElementById('decryptionProgress');
+        if (progressContainer) {
+            progressContainer.style.display = 'block';
+            const progressText = document.getElementById('decryptionProgressText');
+            if (progressText) {
+                progressText.textContent = 'Validating encryption key...';
+            }
         }
+        
+        // Fetch the sample data from the server
+        const sampleURL = fileURL.split('?')[0] + '.sample';
+        const sampleResponse = await fetch(sampleURL, {
+            credentials: 'omit',
+            mode: 'cors'
+        });
+
+        if (!sampleResponse.ok) {
+            // If the sample isn't available, we can't validate
+            // This is likely an old file before sample support was added
+            console.log('Sample not available, skipping validation');
+            hideDecryptionProgress();
+            return;
+        }
+
+        // Get the sample data
+        const sampleData = await sampleResponse.arrayBuffer();
+        
+        console.log('Validating encryption key with sample data...');
+        console.log('Sample data size:', sampleData.byteLength, 'bytes');
+        
+        // Ensure the sample is large enough to decrypt
+        if (sampleData.byteLength < 20) {
+            console.error('Sample data is too small to be valid');
+            throw new Error('Invalid sample data (too small)');
+        }
+        
+        try {
+            // Try to decrypt the sample
+            await FileEncryption.decryptFile(sampleData, key, mimeType);
+            console.log('✓ Key validation successful!');
+            hideDecryptionProgress();
+        } catch (decryptError) {
+            // Decryption failed, key is invalid
+            console.error('Sample decryption failed:', decryptError);
+            throw new Error('Invalid decryption key. The file cannot be decrypted with this key.');
+        }
+    } catch (error) {
+        console.error('Key validation error:', error);
+        
+        // Hide progress and show error
+        hideDecryptionProgress();
+        
+        // Show error message
+        const errorContainer = document.getElementById('encryptionError');
+        if (errorContainer) {
+            errorContainer.style.display = 'block';
+            errorContainer.textContent = error.message || 'Invalid decryption key';
+        }
+        
+        // Hide download options
+        hideDownloadOptions();
     }
 }
 
@@ -395,97 +478,62 @@ async function handleEncryptedDownload(key, fileURL, mimeType, filename) {
         }
         
         // Show progress with initial message
-        showDecryptionProgress('Preparing download...');
+        showDecryptionProgress('Validating encryption key...');
 
-        // Flag to track if we should try full download
-        let shouldTryFullDownload = false;
-
-        // Try the full download directly for fresh uploads
-        // The URL fragment (key) in the address bar indicates this is likely a fresh upload
-        if (window.location.hash && window.location.hash.substring(1) === key) {
-            showDecryptionProgress('Downloading file...');
-            await proceedWithEncryptedDownload(key, fileURL, mimeType, filename);
-            return;
-        }
-
-        // Try to get just the first few KB to validate the key
         try {
-            // Use fetch with range header to get just the first 4KB
-            const validateResponse = await fetch(fileURL, {
-                headers: {
-                    'Range': 'bytes=0-4095'  // First 4KB should include the IV (12 bytes) + some encrypted data
-                },
+            // First fetch the sample data from the server to validate the key
+            const sampleURL = fileURL.split('?')[0] + '.sample';
+            const sampleResponse = await fetch(sampleURL, {
                 // Ensure credentials aren't sent to avoid CORS preflight
                 credentials: 'omit',
                 // Allow CORS
                 mode: 'cors'
             });
+
+            if (!sampleResponse.ok) {
+                // If sample isn't available (likely old file), proceed with full download
+                showDecryptionProgress('Sample not available. Downloading full file...');
+                await proceedWithEncryptedDownload(key, fileURL, mimeType, filename);
+                return;
+            }
+
+            // Get the sample data
+            const sampleData = await sampleResponse.arrayBuffer();
             
-            // Check if range request was successful
-            if (validateResponse.status === 206) {  // 206 Partial Content
+            // Updated version with clearer messaging and handling for the separately encrypted sample
+            try {
+                console.log('Validating encryption key with separately encrypted sample...');
+                console.log('Sample data size:', sampleData.byteLength, 'bytes');
                 
-                // Get content length to see if the full file is small
-                const contentLength = validateResponse.headers.get('content-length');
-                const contentRange = validateResponse.headers.get('content-range');
-                
-                // If content range indicates this is a small file (< 8KB), just download the whole thing
-                if (contentRange && contentRange.includes('/') &&
-                    parseInt(contentRange.split('/')[1]) < 8192) {
-                    shouldTryFullDownload = true;
-                    return;
-                }
-                
-                // Get the sample data
-                const sampleData = await validateResponse.arrayBuffer();
-                
-                // Check if sample data is large enough to contain IV (12 bytes) plus some data
+                // Ensure we have a valid sample to decrypt
                 if (sampleData.byteLength < 20) {
-                    shouldTryFullDownload = true;
-                    return;
+                    console.error('Sample data is too small to be valid');
+                    throw new Error('Sample data is invalid (too small to decrypt)');
                 }
                 
+                // Decrypt the sample
                 try {
-                    // Try to decrypt the sample
-                    await FileEncryption.decryptFile(sampleData, key, mimeType);
+                    const decryptedSample = await FileEncryption.decryptFile(sampleData, key, mimeType);
                     
                     // If we get here, decryption succeeded, so the key is valid
+                    console.log('✓ Key validation successful! Sample decrypted to', decryptedSample.size, 'bytes');
                     showDecryptionProgress('Key validated, downloading file...');
                     
                     // Proceed with full file download
                     await proceedWithEncryptedDownload(key, fileURL, mimeType, filename);
-                    return;
-                } catch (validationError) {
-                    // If validation failed, but this is a fresh upload (URL has the key in fragment),
-                    // we'll still try the full download as it might be a false negative
-                    if (window.location.hash && window.location.hash.substring(1) === key) {
-                        shouldTryFullDownload = true;
-                    } else {
-                        throw new Error('Invalid decryption key. The file cannot be decrypted with this key.');
-                    }
+                } catch (decryptError) {
+                    console.error('Sample decryption failed:', decryptError);
+                    throw new Error('Invalid decryption key. The file cannot be decrypted with this key.');
                 }
-            } else {
-                // Range request not supported or not configured on server
-                shouldTryFullDownload = true;  // Only try full download if range request wasn't supported
+            } catch (validationError) {
+                // Always abort download if validation fails
+                console.error('Key validation failed:', validationError);
+                throw new Error('Invalid decryption key. The file cannot be decrypted with this key.');
             }
-        } catch (rangeError) {
-            // If there was an error with the range request (could be CORS, server config, etc.)
-            if (rangeError.message.includes('Invalid decryption key') && 
-                !(window.location.hash && window.location.hash.substring(1) === key)) {
-                // This is from our validation, so propagate the error
-                // But skip this check for fresh uploads
-                throw rangeError;
-            }
-            shouldTryFullDownload = true;  // Only try full download if range request failed completely
-        }
-
-        // If we should try full download (only if range request wasn't supported or failed completely)
-        if (shouldTryFullDownload) {
-            // Proceed with downloading the full file
-            showDecryptionProgress('Downloading file...');
-            await proceedWithEncryptedDownload(key, fileURL, mimeType, filename);
-        } else {
-            // If we got here without shouldTryFullDownload being true, something unusual happened
-            throw new Error('Key validation process failed');
+        } catch (validationError) {
+            // Never proceed with download if validation fails
+            console.error('Decryption validation failed:', validationError);
+            throw validationError;
         }
     } catch (error) {
         console.error('Download preparation failed:', error);
@@ -926,8 +974,27 @@ function initializeUploader() {
             phrasesInterval = setInterval(function() {
                 updateProgress(null, getRandomEncryptionPhrase());
             }, 5000);
+            
+            // First, create a 4KB sample from the original file
+            const originalSample = file.slice(0, 4096);
+            console.log("Created 4KB sample of original file:", originalSample.size, "bytes");
+            
+            // Update progress for sample encryption
+            updateProgress(30, "Creating validation sample...");
+            
+            // Encrypt the sample separately for validation
+            const encryptedSample = await FileEncryption.encryptFile(originalSample, encryptionKey);
+            const sampleArrayBuffer = await encryptedSample.arrayBuffer();
+            console.log("Encrypted sample size:", sampleArrayBuffer.byteLength, "bytes");
+            
+            // Convert sample to base64 for storage
+            const sampleBase64 = FileEncryption.arrayBufferToBase64(sampleArrayBuffer);
+            console.log("Sample base64 length:", sampleBase64.length);
+            
+            // Update progress for main file encryption
+            updateProgress(40, "Sample created! Encrypting main file...");
 
-            // Encrypt the file
+            // Encrypt the main file
             const encryptedBlob = await FileEncryption.encryptFile(file, encryptionKey);
 
             // Clear the encryption phrases interval
@@ -937,7 +1004,14 @@ function initializeUploader() {
             }
 
             // Update progress
-            updateProgress(70, "File encrypted! Preparing upload...");
+            updateProgress(70, "File encryption complete! Preparing upload...");
+
+            // Add the encrypted sample to a hidden form field
+            const sampleInput = document.createElement('input');
+            sampleInput.type = 'hidden';
+            sampleInput.name = 'encrypted_sample';
+            sampleInput.value = sampleBase64;
+            uploadForm.appendChild(sampleInput);
 
             // Create a File object from the encrypted blob
             const encryptedFile = new File([encryptedBlob], file.name, {

@@ -126,6 +126,7 @@ func main() {
 	// Register routes
 	r.Get("/", h.Index)
 	r.Post("/upload", h.Upload)
+	r.Get("/file/{fileID:[a-f0-9-]+}.sample", h.ServeEncryptedSample)
 	r.Get("/file/{id}", h.ServeFileByID)
 	r.Get("/error", h.ErrorPage)
 	r.Get("/terms", h.Terms)

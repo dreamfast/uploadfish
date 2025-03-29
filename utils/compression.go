@@ -3,7 +3,9 @@ package utils
 import (
 	"bytes"
 	"compress/gzip"
+	"encoding/base64"
 	"io"
+	"strings"
 )
 
 // Compress compresses data using gzip with best compression level
@@ -31,4 +33,27 @@ func Decompress(data []byte) ([]byte, error) {
 	}
 	defer gz.Close()
 	return io.ReadAll(gz)
+}
+
+// Base64Encode encodes data to URL-safe base64
+func Base64Encode(data []byte) string {
+	encoded := base64.StdEncoding.EncodeToString(data)
+	// Make URL safe
+	return strings.ReplaceAll(strings.ReplaceAll(encoded, "+", "-"), "/", "_")
+}
+
+// Base64Decode decodes URL-safe base64 to bytes
+func Base64Decode(encoded string) ([]byte, error) {
+	// Restore standard base64
+	standardBase64 := strings.ReplaceAll(strings.ReplaceAll(encoded, "-", "+"), "_", "/")
+
+	// Add padding if needed
+	switch len(standardBase64) % 4 {
+	case 2:
+		standardBase64 += "=="
+	case 3:
+		standardBase64 += "="
+	}
+
+	return base64.StdEncoding.DecodeString(standardBase64)
 }
