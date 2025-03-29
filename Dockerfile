@@ -17,8 +17,8 @@ FROM alpine:3.19
 
 WORKDIR /app
 
-# Install CA certificates for HTTPS and wget for healthcheck
-RUN apk --no-cache add ca-certificates wget && \
+# Install CA certificates for HTTPS
+RUN apk --no-cache add ca-certificates && \
     # Create data directory for BitCask
     mkdir -p /app/data && \
     chmod 755 /app/data
@@ -38,10 +38,6 @@ ENV CLEANUP_INTERVAL=1h
 
 # Expose port
 EXPOSE 8080
-
-# Add healthcheck
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD wget -q --spider http://localhost:8080/ || exit 1
 
 # Run the application
 CMD ["/app/uploadfish"]

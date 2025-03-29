@@ -33,13 +33,13 @@ if [ "$(docker ps -q -f name=uploadfish)" ]; then
     echo "🔗 Access your UploadFish instance at: http://localhost:8085"
     echo
     echo "📊 Container health:"
-    docker-compose ps
+    docker compose ps
     echo
-    echo "📝 To view logs: docker-compose logs -f"
-    echo "⏹️  To stop: docker-compose down"
+    echo "📝 To view logs: docker compose logs -f"
+    echo "⏹️  To stop: docker compose down"
 else
     echo "❌ Failed to start UploadFish container."
     echo "📋 Checking logs:"
-    docker-compose logs uploadfish
+    docker compose logs uploadfish
     exit 1
 fi
