@@ -21,7 +21,6 @@ function safeCall(fn, ...args) {
 
 // Load modules when DOM is ready
 document.addEventListener('DOMContentLoaded', function () {
-    console.log('UploadFish initializing...');
     
     try {
         // Check for required modules
@@ -38,19 +37,16 @@ document.addEventListener('DOMContentLoaded', function () {
         const isPreviewPage = document.body.hasAttribute('data-encrypted') || 
                              document.getElementById('previewContainer') !== null;
         
-        console.log('Page type:', isUploadPage ? 'Upload' : (isPreviewPage ? 'Preview' : 'Other'));
         
         // Initialize the appropriate page
         if (isUploadPage) {
             if (typeof initializeUploader === 'function') {
-                console.log('Initializing uploader page...');
                 safeCall(initializeUploader);
             } else {
                 console.error('Upload module not loaded correctly');
             }
         } else if (isPreviewPage) {
             if (typeof initializePreviewPage === 'function') {
-                console.log('Initializing preview page...');
                 safeCall(initializePreviewPage);
             } else {
                 console.error('Preview module not loaded correctly');
@@ -60,7 +56,6 @@ document.addEventListener('DOMContentLoaded', function () {
         // Check for encryption support
         if (typeof FileEncryption !== 'undefined') {
             const isSupported = FileEncryption.isEncryptionSupported();
-            console.log('Encryption support:', isSupported ? 'Available' : 'Not available');
             
             if (!isSupported && typeof showEncryptionWarning === 'function') {
                 safeCall(showEncryptionWarning);

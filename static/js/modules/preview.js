@@ -122,14 +122,12 @@ async function validateEncryptionSample(key, fileURL, mimeType, filename) {
             return false;
         }
         
-        console.log('Basic key format validation passed, key length:', key.length);
         
         // Step 2: Get the sample file to validate against
         let sampleResponse;
         try {
             // Get the base URL without query parameters for the sample file
             const baseURL = fileURL.split('?')[0];
-            console.log('Fetching validation sample from:', baseURL + '.sample');
             
             sampleResponse = await fetch(baseURL + '.sample', {
                 credentials: 'omit',
@@ -144,7 +142,6 @@ async function validateEncryptionSample(key, fileURL, mimeType, filename) {
         
         // If no sample file exists, it's an older file without sample validation
         if (!sampleResponse.ok) {
-            console.log('No validation sample available, skipping validation');
             hideDecryptionProgress();
             return true;
         }
@@ -153,7 +150,6 @@ async function validateEncryptionSample(key, fileURL, mimeType, filename) {
         try {
             // Get the sample data
             const sampleData = await sampleResponse.arrayBuffer();
-            console.log('Received validation sample data, size:', sampleData.byteLength, 'bytes');
             
             // Check if the sample is valid for decryption (needs at least IV + some content)
             if (sampleData.byteLength < 13) {
@@ -171,7 +167,6 @@ async function validateEncryptionSample(key, fileURL, mimeType, filename) {
             // Try to decrypt the sample with the provided key
             try {
                 await FileEncryption.decryptFile(sampleData, key, mimeType);
-                console.log('Validation successful: Sample decrypted correctly');
                 
                 // Update progress text
                 if (progressText) {
@@ -330,9 +325,7 @@ async function handleEncryptedDownload(key, fileURL, mimeType, filename) {
         if (!encryptedData || encryptedData.byteLength < 13) {
             throw new Error('Downloaded file is invalid or too small');
         }
-        
-        console.log(`Downloaded encrypted file: ${formatSize(encryptedData.byteLength)} bytes`);
-        
+
         // Step 3: Decrypt the file
         showProgressUI('Decrypting file...', 60);
         

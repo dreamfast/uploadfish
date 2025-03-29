@@ -83,8 +83,9 @@ func main() {
 	}(store)
 
 	// Initialize rate limiters with different rates
-	uploadRateLimiter := utils.NewRateLimiter(cfg.RateLimit/10, cfg.RateLimitWindow, cfg.RateLimitCleanup) // Stricter for uploads
-	apiRateLimiter := utils.NewRateLimiter(cfg.RateLimit, cfg.RateLimitWindow, cfg.RateLimitCleanup)       // Normal for regular requests
+	uploadRateLimiter := utils.NewRateLimiter(cfg.RateLimit/10, cfg.RateLimitWindow, cfg.RateLimitCleanup)     // Stricter for uploads
+	chunkUploadRateLimiter := utils.NewRateLimiter(cfg.RateLimit*5, cfg.RateLimitWindow, cfg.RateLimitCleanup) // Much more permissive for chunks
+	apiRateLimiter := utils.NewRateLimiter(cfg.RateLimit, cfg.RateLimitWindow, cfg.RateLimitCleanup)           // Normal for regular requests
 
 	// Initialize CSRF protection with logger
 	csrfProtection := utils.NewCSRFProtection(cfg.CSRFExpiration, &CSRFLogger{})
@@ -104,7 +105,7 @@ func main() {
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   []string{cfg.BaseURL},
 		AllowedMethods:   []string{"GET", "POST", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Content-Type", "Range"},
+		AllowedHeaders:   []string{"Accept", "Content-Type", "Range", "X-CSRF-Token", "X-Requested-With"},
 		AllowCredentials: true,
 		MaxAge:           300,
 	}))
@@ -127,7 +128,7 @@ func main() {
 				ip = strings.Split(forwardedFor, ",")[0]
 			}
 
-			// Apply stricter rate limits for uploads
+			// Apply stricter rate limits for standard uploads, bypass for chunked uploads
 			if r.Method == "POST" && r.URL.Path == "/upload" {
 				if !uploadRateLimiter.Allow(ip) {
 					LogInfo("Rate limit exceeded for upload", map[string]interface{}{
@@ -137,6 +138,18 @@ func main() {
 					http.Error(w, "Upload rate limit exceeded", http.StatusTooManyRequests)
 					return
 				}
+			} else if r.Method == "POST" && r.URL.Path == "/upload/chunk" {
+				// Use a very permissive rate limiter for chunks, with higher log visibility
+				if !chunkUploadRateLimiter.Allow(ip) {
+					LogInfo("Rate limit exceeded for chunk upload", map[string]interface{}{
+						"ip":   ip,
+						"path": r.URL.Path,
+					})
+					http.Error(w, "Chunk upload rate limit exceeded", http.StatusTooManyRequests)
+					return
+				}
+			} else if r.Method == "POST" && r.URL.Path == "/upload/finalize" {
+				// Skip rate limiting for finalization to ensure uploads complete
 			} else {
 				// Regular rate limit for other endpoints
 				if !apiRateLimiter.Allow(ip) {
@@ -156,8 +169,11 @@ func main() {
 	// Add body size limiting middleware for non-upload endpoints
 	r.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Skip for upload endpoint and static resources
-			if r.URL.Path == "/upload" || strings.HasPrefix(r.URL.Path, "/static/") {
+			// Skip for upload endpoints and static resources
+			if r.URL.Path == "/upload" ||
+				r.URL.Path == "/upload/chunk" ||
+				r.URL.Path == "/upload/finalize" ||
+				strings.HasPrefix(r.URL.Path, "/static/") {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -174,6 +190,8 @@ func main() {
 	// Register routes
 	r.Get("/", h.Index)
 	r.Post("/upload", h.Upload)
+	r.Post("/upload/chunk", h.ChunkUpload)
+	r.Post("/upload/finalize", h.FinalizeUpload)
 	r.Get("/file/{fileID:[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}}.sample", h.ServeEncryptedSample)
 	r.Get("/file/{fileID:[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}}", h.ServeFileByID)
 	r.Get("/error", h.ErrorPage)

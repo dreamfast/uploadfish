@@ -76,15 +76,9 @@ class FileEncryption {
 
             // Extract the IV from the beginning of the data (first 12 bytes)
             const iv = new Uint8Array(encryptedData.slice(0, 12));
-            console.log("IV bytes:", Array.from(iv).slice(0, 5), "...");
 
             // Extract the encrypted content (everything after the IV)
             const encryptedContent = new Uint8Array(encryptedData.slice(12));
-            
-            // Log the data we're working with
-            console.log("Decrypting data - total size:", encryptedData.byteLength, 
-                        "bytes, IV size:", iv.length, 
-                        "bytes, content size:", encryptedContent.length, "bytes");
             
             if (encryptedContent.length < 1) {
                 console.error("No encrypted content found after IV");
@@ -106,8 +100,6 @@ class FileEncryption {
                 key,
                 encryptedContent
             );
-
-            console.log("Decryption successful, decrypted size:", decryptedContent.byteLength, "bytes");
 
             // Return as a Blob with original file type
             return new Blob([decryptedContent], {type: fileType});

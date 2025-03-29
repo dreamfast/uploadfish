@@ -42,6 +42,7 @@ function initializeUploader() {
     // Phrases for upload and encryption process feedback
     const phrases = {
         fish: [
+            // Original phrases
             "Catching your fish...",
             "Reeling it in...",
             "Fish on the hook!",
@@ -81,7 +82,117 @@ function initializeUploader() {
             "Setting up the fish trap...",
             "Waiting for the perfect catch...",
             "Measuring the data depth...",
-            "Navigating the data waters..."
+            "Navigating the data waters...",
+            "Charting the nautical upload...",
+            "Scouting for fish servers...",
+            "Measuring your catch...",
+            "Deploying the data trawler...",
+            "Loading the fishing boat...",
+            "Calculating fish density...",
+            "Checking the sonar...",
+            "Navigating through seaweed...",
+            "Avoiding the Kraken...",
+            "Polishing the sea glass...",
+            "Consulting the fish oracle...",
+            "Analyzing the fish DNA...",
+            "Deploying underwater drones...",
+            "Tagging your data fish...",
+            "Mapping the migration route...",
+            "Looking through the fish eye lens...",
+            "Preparing the fish tank...",
+            "Cleaning the aquarium...",
+            "Adjusting the water salinity...",
+            "Calculating spawn rates...",
+            "Checking for digital plankton...",
+            "Scanning for data reefs...",
+            "Translating fish language...",
+            "Tuning into whale songs...",
+            "Setting sail for data island...",
+            "Watching for data tsunamis...",
+            "Surfing the binary waves...",
+            "Riding the upload current...",
+            "Talking to the wise old trout...",
+            "Preparing the digital fish food...",
+            "Capturing rare data species...",
+            "Studying marine file biology...",
+            "Visiting Davy Jones' server locker...",
+            "Calculating the perfect cast...",
+            "Aligning with the lunar tide...",
+            "Checking your fishing license...",
+            "Analyzing fish behavior patterns...",
+            "Calibrating the fish sonar...",
+            "Crossing the digital Bermuda Triangle...",
+            "Measuring the upload knots...",
+            "Recording underwater file sounds...",
+            "Tracing fish migration patterns...",
+            "Deploying smart fishing buoys...",
+            "Adjusting to underwater pressure...",
+            "Capturing data with gentle nets...",
+            "Negotiating with the server mermaids...",
+            "Paying the ferry man...",
+            "Searching for the lost city of Data-lantis...",
+            "Listening to the conch shell...",
+            "Decoding messages in bottles...",
+            "Sending data via carrier seagull...",
+            "Fighting the mighty data squid...",
+            "Sailing through the binary fog...",
+            "Ringing the digital ship bell...",
+            "Singing sea shanties to your files...",
+            "Interpreting cloud formations at sea...",
+            "Setting up digital fishing tournaments...",
+            "Registering with the Coast Guard...",
+            "Scanning for friendly dolphins...",
+            "Using data as chum...",
+            "Scanning the horizon for pirate servers...",
+            "Whistling to the narwhals...",
+            "Tuning the underwater radio...",
+            "Taming wild data marlin...",
+            "Feeding the binary sea lions...",
+            "Interpreting seahorse Morse code...",
+            "Redirecting the Gulf Stream...",
+            "Discovering the ancient scroll of TCP/IP...",
+            "Consulting the oracle fish...",
+            "Dancing with digital sea turtles...",
+            "Watching for bioluminescent data packets...",
+            "Measuring salinity of the data lake...",
+            "Sending the data submarine deeper...",
+            "Searching for the perfect shell...",
+            "Counting data barnacles...",
+            "Harvesting digital seaweed...",
+            "Deflecting the water pressure...",
+            "Chatting with wise sea turtles...",
+            "Polishing the trident of Neptune...",
+            "Breaking through the digital ice caps...",
+            "Aligning with marine magnetism...",
+            "Filtering the digital plankton...",
+            "Balancing on digital waves...",
+            "Adjusting to the tidal algorithm...",
+            "Consulting the ancient mariner...",
+            "Measuring the depth of your data pool...",
+            "Syncing with the lunar tide cycle...",
+            "Adjusting the sail for data winds...",
+            "Photographing rare data fish...",
+            "Catching sunlight on digital scales...",
+            "Reading the water's memory...",
+            "Consulting the nautical charts...",
+            "Testing water for data nutrients...",
+            "Identifying exotic file species...",
+            "Launching echo location...",
+            "Calibrating the digital sextant...",
+            "Watching for aurora borealis reflections...",
+            "Preparing the data fishing journal...",
+            "Calculating perfect diving depth...",
+            "Consulting with wise old sea captains...",
+            "Measuring file buoyancy...",
+            "Checking the ship's clock...",
+            "Watching for digital high tide...",
+            "Scanning the beach for rare file shells...",
+            "Consulting the barnacle oracle...",
+            "Training digital dolphins...",
+            "Watching for passing data icebergs...",
+            "Calling to the digital sirens...",
+            "Negotiating with the server pirates...",
+            "Checking for data sea monsters..."
         ],
         encryption: [
             "Encrypting your fish...",
@@ -93,7 +204,66 @@ function initializeUploader() {
             "Generating submarine codes...",
             "Hiding the treasure map...",
             "Making your data invisible...",
-            "Protecting with underwater shields..."
+            "Protecting with underwater shields...",
+            "Sealing your data in a clam shell...",
+            "Encoding with mermaid magic...",
+            "Generating Poseidon's password...",
+            "Creating Davy Jones' lock...",
+            "Installing sea urchin firewalls...",
+            "Wrapping files in kelp encryption...",
+            "Deploying pufferfish protection...",
+            "Activating nautical ciphers...",
+            "Hardening your pearl...",
+            "Securing with salt water hashing...",
+            "Applying barnacle authentication...",
+            "Encoding with shark tooth patterns...",
+            "Locking in the Marianas Trench...",
+            "Disguising as common seaweed...",
+            "Camouflaging in coral patterns...",
+            "Engaging kraken guard protocols...",
+            "Requesting mermaid verification...",
+            "Deploying ink cloud obfuscation...",
+            "Generating tidal encryption keys...",
+            "Applying deep sea pressure locks...",
+            "Installing reef access controls...",
+            "Setting up seahorse sentries...",
+            "Activating whale song authentication...",
+            "Deploying electric eel protection...",
+            "Enabling starfish verification...",
+            "Setting up shell-based access control...",
+            "Wrapping in water-tight cryptography...",
+            "Hiding in the digital shipwreck...",
+            "Spinning nautical encryption webs...",
+            "Engraving data on underwater stones...",
+            "Creating cryptographic coral barriers...",
+            "Deploying anglerfish decoys...",
+            "Locking with abyssal pressure...",
+            "Encoding with bioluminescent patterns...",
+            "Encrypting with sea turtle shell patterns...",
+            "Securing with oceanic algorithmic currents...",
+            "Applying nautical steganography...",
+            "Hiding data in whale songs...",
+            "Encrypting with tidal rhythms...",
+            "Securing with deep sea volcanic vents...",
+            "Encoding with fish scale patterns...",
+            "Applying jellyfish sting authentication...",
+            "Setting up nautical multi-factor security...",
+            "Deploying digital sand dollar tokens...",
+            "Generating certificates from sea glass...",
+            "Implementing bubble encryption...",
+            "Building fortifications of digital coral...",
+            "Encrypting with underwater cave systems...",
+            "Securing with deep sea pressure locks...",
+            "Implementing nautical VPN tunnels...",
+            "Creating hermit crab encryption shells...",
+            "Deploying sea anemone firewalls...",
+            "Generating maelstrom encryption keys...",
+            "Encrypting with maritime fog...",
+            "Securing with oceanic depth layers...",
+            "Setting up shark patrol perimeters...",
+            "Implementing aquatic zero-trust security...",
+            "Creating digital tide pool vaults...",
+            "Applying submarine stealth technology..."
         ]
     };
 
@@ -309,9 +479,7 @@ function initializeUploader() {
         let sampleInput = null;
         try {
             // Generate a random encryption key
-            console.log("Generating encryption key...");
             const encryptionKey = await FileEncryption.generateKey();
-            console.log("Key generation successful");
 
             // Start rotating encryption phrases during the encryption process
             updateProgress(20, getRandomEncryptionPhrase());
@@ -323,7 +491,6 @@ function initializeUploader() {
             
             // First, create a 4KB sample from the original file
             const originalSample = file.slice(0, 4096);
-            console.log("Created 4KB sample of original file:", originalSample.size, "bytes");
             
             // Update progress for sample encryption
             updateProgress(30, "Creating validation sample...");
@@ -332,18 +499,15 @@ function initializeUploader() {
                 // Encrypt the sample separately for validation
                 const encryptedSample = await FileEncryption.encryptFile(originalSample, encryptionKey);
                 const sampleArrayBuffer = await encryptedSample.arrayBuffer();
-                console.log("Encrypted sample size:", sampleArrayBuffer.byteLength, "bytes");
                 
                 // Convert sample to base64 for storage
                 const sampleBase64 = FileEncryption.arrayBufferToBase64(sampleArrayBuffer);
-                console.log("Sample base64 length:", sampleBase64.length);
                 
                 // Update progress for main file encryption
                 updateProgress(40, "Sample created! Encrypting main file...");
 
                 // Encrypt the main file
                 const encryptedBlob = await FileEncryption.encryptFile(file, encryptionKey);
-                console.log("Main file encryption complete");
 
                 // Add the encrypted sample to a hidden form field
                 sampleInput = document.createElement('input');
@@ -358,16 +522,25 @@ function initializeUploader() {
                     lastModified: file.lastModified
                 });
 
-                // Copy the encrypted file to the form's file input
-                const dataTransfer = new DataTransfer();
-                dataTransfer.items.add(encryptedFile);
-                elements.formFileInput.files = dataTransfer.files;
+                // Check if we should use chunked upload
+                if (encryptedFile.size > 10 * 1024 * 1024) { // Use chunked upload for files over 10MB
+                    updateProgress(70, "File encryption complete! Starting chunked upload...");
+                    
+                    // Add the encrypted sample to the chunked upload instead of form
+                    await sendChunkedUpload(encryptedFile, encryptionKey, sampleBase64);
+                } else {
+                    // For smaller files, use regular upload
+                    // Copy the encrypted file to the form's file input
+                    const dataTransfer = new DataTransfer();
+                    dataTransfer.items.add(encryptedFile);
+                    elements.formFileInput.files = dataTransfer.files;
 
-                // Update progress
-                updateProgress(70, "File encryption complete! Preparing upload...");
+                    // Update progress
+                    updateProgress(70, "File encryption complete! Preparing upload...");
 
-                // Send the upload request
-                await sendUploadRequest(encryptionKey);
+                    // Send the upload request
+                    await sendUploadRequest(encryptionKey);
+                }
             } catch (encryptionError) {
                 console.error('Encryption operation failed:', encryptionError);
                 throw new Error('Failed to encrypt file: ' + encryptionError.message);
@@ -400,8 +573,269 @@ function initializeUploader() {
         sendUploadRequest();
     }
 
+    // Constants for chunked upload
+    const CHUNK_SIZE = 50 * 1024 * 1024; // 50MB chunks for faster uploads on local/fast networks
+    const MAX_RETRIES = 3;
+    
+    // Send the file in chunks
+    async function sendChunkedUpload(file, encryptionKey = null, sampleBase64 = null) {
+        // Prepare for chunked upload
+        const fileSize = file.size;
+        const fileId = crypto.randomUUID(); // Generate a unique ID for this upload
+        const totalChunks = Math.ceil(fileSize / CHUNK_SIZE);
+        let currentChunk = 0;
+        let bytesUploaded = 0;
+        let uploadStartTime = Date.now();
+        let lastProgressUpdate = uploadStartTime;
+        let uploadComplete = false;
+        
+        // Start phrase rotation for chunked upload
+        updateProgress(0, "0% - " + getRandomFishPhrase());
+        phrasesInterval = setInterval(function() {
+            const percent = Math.min(Math.round((bytesUploaded / fileSize) * 100), 99);
+            elements.progressText.textContent = percent + "% - " + getRandomFishPhrase();
+        }, 5000);
+        
+        // Helper function to upload a single chunk
+        async function uploadChunk(chunkIndex, retryCount = 0) {
+            const start = chunkIndex * CHUNK_SIZE;
+            const end = Math.min(start + CHUNK_SIZE, fileSize);
+            const chunk = file.slice(start, end);
+            
+            const formData = new FormData();
+            
+            // Add chunk metadata
+            formData.append('file', chunk, file.name);
+            formData.append('chunk_index', chunkIndex);
+            formData.append('total_chunks', totalChunks);
+            formData.append('file_id', fileId);
+            formData.append('file_size', fileSize);
+            formData.append('filename', file.name);
+            formData.append('expiry', elements.formExpiryInput.value);
+            formData.append('encrypted', elements.formEncryptedInput.value);
+            
+            // If this is the first chunk and we have an encrypted sample, include it
+            if (chunkIndex === 0 && sampleBase64) {
+                formData.append('encrypted_sample', sampleBase64);
+            }
+            
+            // Add CSRF token
+            const csrfToken = ensureCsrfToken(formData);
+            
+            try {
+                // Upload the chunk
+                const response = await fetch('/upload/chunk', {
+                    method: 'POST',
+                    body: formData,
+                    headers: {
+                        'X-CSRF-Token': csrfToken,
+                        'X-Requested-With': 'XMLHttpRequest'
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`Server returned ${response.status}: ${await response.text()}`);
+                }
+                
+                // Update progress
+                bytesUploaded += (end - start);
+                const percent = Math.min(Math.round((bytesUploaded / fileSize) * 100), 99);
+                
+                const now = Date.now();
+                if (now - lastProgressUpdate > 200) {
+                    const elapsedSeconds = (now - uploadStartTime) / 1000;
+                    const bytesPerSecond = bytesUploaded / elapsedSeconds;
+                    
+                    if (now - uploadStartTime > 5000) {
+                    }
+                    
+                    // Update progress bar
+                    elements.progressBar.style.width = percent + '%';
+                    
+                    // Update percentage in the phrase
+                    const currentText = elements.progressText.textContent;
+                    const dashIndex = currentText.indexOf("% -");
+                    if (dashIndex >= 0) {
+                        const newText = percent + currentText.substring(dashIndex);
+                        elements.progressText.textContent = newText;
+                    } else {
+                        elements.progressText.textContent = percent + "% - " + getRandomFishPhrase();
+                    }
+                    
+                    lastProgressUpdate = now;
+                }
+                
+                return true;
+            } catch (error) {
+                console.error(`Error uploading chunk ${chunkIndex}:`, error);
+                
+                // Special handling for rate limit errors
+                const isRateLimit = error.message && error.message.includes('429');
+                
+                // Retry logic with different backoff strategies
+                if (retryCount < MAX_RETRIES) {
+                    let delay;
+                    
+                    if (isRateLimit) {
+                        // Much longer delay for rate limit errors (4s, 8s, 16s)
+                        delay = Math.pow(2, retryCount + 2) * 1000;
+                    } else {
+                        // Standard delay for other errors
+                        delay = 1000 * (retryCount + 1);
+                    }
+                    
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    return uploadChunk(chunkIndex, retryCount + 1);
+                }
+                
+                throw error;
+            }
+        }
+        
+        try {
+            // Upload chunks in parallel for maximum speed
+            const MAX_CONCURRENT_UPLOADS = 5; // Fewer concurrent uploads with larger chunks
+            let activeUploads = 0;
+            let nextChunkIndex = 0;
+            let completedChunks = 0;
+            
+            // Create a function to upload the next chunk in queue
+            const uploadNextChunk = async () => {
+                if (nextChunkIndex >= totalChunks) {
+                    return; // No more chunks to upload
+                }
+                
+                const chunkIndex = nextChunkIndex++;
+                activeUploads++;
+                
+                try {
+                    // Use the special rate limit handler instead of direct uploadChunk
+                    await uploadChunkWithRateLimitRetry(chunkIndex);
+                    completedChunks++;
+                    
+                    // Update overall progress
+                    const totalProgress = Math.min(Math.round((completedChunks / totalChunks) * 100), 99);
+                    elements.progressBar.style.width = totalProgress + '%';
+                } catch (error) {
+                    console.error(`Failed to upload chunk ${chunkIndex} after all retries:`, error);
+                    throw error; // Re-throw to be caught by outer try/catch
+                } finally {
+                    activeUploads--;
+                    // Start another upload if there are more chunks
+                    if (!uploadComplete) {
+                        // Immediately start next chunk for maximum throughput on localhost
+                        setTimeout(() => {
+                            uploadNextChunk();
+                        }, 50); // Minimal delay for local/fast networks
+                    }
+                }
+            };
+            
+            // Special handling for rate limit errors
+            async function uploadChunkWithRateLimitRetry(chunkIndex, maxRetries = MAX_RETRIES + 2) {
+                let retryCount = 0;
+                
+                while (retryCount < maxRetries) {
+                    try {
+                        return await uploadChunk(chunkIndex);
+                    } catch (error) {
+                        // If this is a rate limit error, use a longer backoff
+                        if (error.message && error.message.includes('429')) {
+                            retryCount++;
+                            
+                            // Use exponentially increasing delays for rate limit errors
+                            const delay = Math.min(Math.pow(1.5, retryCount) * 1000, 15000); // Cap at 15 seconds
+                            
+                            
+                            // Wait for the cooldown period
+                            await new Promise(resolve => setTimeout(resolve, delay));
+                        } else {
+                            // For other errors, don't retry, just propagate the error
+                            throw error;
+                        }
+                    }
+                }
+                
+                // If we get here, we've exceeded max retries
+                throw new Error(`Failed to upload chunk ${chunkIndex} after ${maxRetries} rate limit retries`);
+            }
+            
+            // Start multiple uploads in parallel
+            const initialUploads = Math.min(MAX_CONCURRENT_UPLOADS, totalChunks);
+            for (let i = 0; i < initialUploads; i++) {
+                setTimeout(() => {
+                    uploadNextChunk();
+                }, i * 100); // Stagger the initial uploads by 100ms each
+            }
+            
+            // Wait for all chunks to complete
+            while (completedChunks < totalChunks && !uploadComplete) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
+            
+            // If any chunk failed, the error would have been thrown
+            
+            // All chunks uploaded, finalize the upload
+            const finalizeData = new FormData();
+            finalizeData.append('file_id', fileId);
+            finalizeData.append('total_chunks', totalChunks);
+            finalizeData.append('filename', file.name);
+            finalizeData.append('file_size', fileSize);
+            finalizeData.append('expiry', elements.formExpiryInput.value);
+            finalizeData.append('encrypted', elements.formEncryptedInput.value);
+            
+            // Add CSRF token
+            const csrfToken = ensureCsrfToken(finalizeData);
+            
+            const finalizeResponse = await fetch('/upload/finalize', {
+                method: 'POST',
+                body: finalizeData,
+                headers: {
+                    'X-CSRF-Token': csrfToken,
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
+            });
+            
+            if (!finalizeResponse.ok) {
+                throw new Error(`Failed to finalize upload: ${await finalizeResponse.text()}`);
+            }
+            
+            const result = await finalizeResponse.json();
+            
+            // Success! Show completion and redirect
+            uploadComplete = true;
+            updateProgress(100, '100% - Complete!');
+            
+            // Add a small delay before redirect to show the completion
+            setTimeout(() => {
+                // Redirect with encryption key if needed
+                if (encryptionKey) {
+                    window.location.href = result.redirect_url + '#' + encryptionKey;
+                } else {
+                    window.location.href = result.redirect_url;
+                }
+            }, 500);
+            
+        } catch (error) {
+            console.error('Chunked upload failed:', error);
+            showError('Upload failed: ' + error.message);
+        } finally {
+            // Clear the phrase rotation interval
+            if (phrasesInterval) {
+                clearInterval(phrasesInterval);
+                phrasesInterval = null;
+            }
+        }
+    }
+
     // Send the upload request with progress tracking
     async function sendUploadRequest(encryptionKey = null) {
+        // Check if we should use chunked upload
+        const file = elements.formFileInput.files[0];
+        if (file && file.size > 10 * 1024 * 1024) { // Use chunked upload for files over 10MB
+            return sendChunkedUpload(file, encryptionKey);
+        }
+        
         let xhr = null;
         let timeoutId = null;
         
@@ -426,7 +860,6 @@ function initializeUploader() {
             
             // Set up progress tracking
             const fileSize = elements.formFileInput.files[0].size;
-            console.log(`Starting upload of file (${formatFileSize(fileSize)})`);
             
             let uploadComplete = false;
             let uploadStartTime = Date.now();
@@ -458,7 +891,6 @@ function initializeUploader() {
                         
                         // Log upload speed for debugging
                         if (now - uploadStartTime > 5000) { // After 5 seconds, show speed
-                            console.log(`Upload speed: ${formatFileSize(bytesPerSecond)}/s`);
                         }
                         
                         // Show fish phrases throughout the entire upload process
@@ -504,7 +936,6 @@ function initializeUploader() {
                 if (xhr.status >= 200 && xhr.status < 300) {
                     // Success handling
                     updateProgress(100, '100% - Complete!');
-                    console.log('Upload successful');
                     
                     // Add a small delay before redirect to show the completion
                     setTimeout(() => {
@@ -543,7 +974,6 @@ function initializeUploader() {
             
             // Send the form data
             xhr.send(formData);
-            console.log('Upload request sent');
             
         } catch (error) {
             console.error('Upload preparation error:', error);
@@ -580,10 +1010,25 @@ function initializeUploader() {
 
     // Ensure CSRF token is included
     function ensureCsrfToken(formData) {
-        const csrfToken = document.getElementById('formCsrfToken').value;
-        if (!formData.has('csrf_token')) {
-            formData.set('csrf_token', csrfToken);
+        // Always get the most current token from the DOM
+        const csrfTokenInput = document.getElementById('formCsrfToken');
+        let csrfToken = '';
+        
+        if (csrfTokenInput && csrfTokenInput.value) {
+            csrfToken = csrfTokenInput.value;
+        } else {
+            // As a fallback, try to parse it from the cookie
+            const csrfCookie = document.cookie.split('; ').find(row => row.startsWith('csrf_token='));
+            if (csrfCookie) {
+                csrfToken = csrfCookie.split('=')[1];
+            } else {
+                console.error('No CSRF token found in form or cookie');
+            }
         }
+        
+        // Always set the csrf token in the form data
+        formData.set('csrf_token', csrfToken);
+        return csrfToken;
     }
 
     // Update progress bar
