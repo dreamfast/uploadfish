@@ -9,6 +9,7 @@
     <script src="/static/js/modules/dom.js"></script>
     <script src="/static/js/modules/utils.js"></script>
     <script src="/static/js/modules/encryption.js"></script>
+    <script src="/static/js/modules/phrases.js"></script>
     
     <!-- Preview page module -->
     <script src="/static/js/modules/preview.js"></script>
@@ -45,7 +46,7 @@
             
             <div class="modal-logo">
                 <a href="/">
-                    <img src="/static/logo.png" alt="Upload Fish Logo" class="modal-logo-image">
+                    <img src="/static/logo.png" alt="Upload Fish Logo" class="modal-logo-image preview-logo">
                 </a>
             </div>
             
@@ -70,6 +71,13 @@
                     <div class="progress-bar" id="decryptionProgressBar"></div>
                 </div>
                 <div class="progress-text" id="decryptionProgressText">Decrypting...</div>
+            </div>
+            
+            <div id="downloadProgress" style="display: none;">
+                <div class="progress">
+                    <div class="progress-bar" id="downloadProgressBar"></div>
+                </div>
+                <div class="progress-text" id="downloadProgressText">Downloading...</div>
             </div>
             
             <div id="previewContainer" class="preview-container" {{if .IsEncrypted}}style="display: none;"{{end}}>

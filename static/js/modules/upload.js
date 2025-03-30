@@ -282,13 +282,14 @@ function initializeUploader() {
     }
     
     // Simplified access to phrase arrays
-    function getRandomFishPhrase() {
-        return getRandomPhrase(phrases.fish);
-    }
-
-    function getRandomEncryptionPhrase() {
-        return getRandomPhrase(phrases.encryption);
-    }
+    // These functions are now defined in phrases.js
+    // function getRandomFishPhrase() {
+    //     return getRandomPhrase(phrases.fish);
+    // }
+    //
+    // function getRandomEncryptionPhrase() {
+    //     return getRandomPhrase(phrases.encryption);
+    // }
 
     // Get max file size from the UI
     function getMaxFileSize() {
@@ -611,10 +612,15 @@ function initializeUploader() {
         let lastProgressUpdate = uploadStartTime;
         let uploadComplete = false;
         
+        // For smoothing the time remaining estimate
+        const speedMeasurements = [];
+        const MAX_SPEED_MEASUREMENTS = 5;
+
         // Start phrase rotation for chunked upload
         updateProgress(0, "0% - " + getRandomFishPhrase());
         phrasesInterval = setInterval(function() {
-            const percent = Math.min(Math.round((bytesUploaded / fileSize) * 100), 99);
+            // Allocate 95% of progress bar for chunk uploads, 5% for finalization
+            const percent = Math.floor((bytesUploaded / fileSize) * 95);
             elements.progressText.textContent = percent + "% - " + getRandomFishPhrase();
         }, 5000);
         
@@ -661,28 +667,58 @@ function initializeUploader() {
                 
                 // Update progress
                 bytesUploaded += (end - start);
-                const percent = Math.min(Math.round((bytesUploaded / fileSize) * 100), 99);
+                // Allocate 95% of progress bar for chunk uploads, 5% for finalization
+                const percent = Math.floor((bytesUploaded / fileSize) * 95);
                 
                 const now = Date.now();
                 if (now - lastProgressUpdate > 200) {
                     const elapsedSeconds = (now - uploadStartTime) / 1000;
-                    const bytesPerSecond = bytesUploaded / elapsedSeconds;
+                    const currentSpeed = (end - start) / ((now - lastProgressUpdate) / 1000);
                     
-                    if (now - uploadStartTime > 5000) {
+                    // Store speed measurements for smoothing
+                    if (currentSpeed > 0 && isFinite(currentSpeed)) {
+                        speedMeasurements.push(currentSpeed);
+                        
+                        // Keep only the most recent measurements
+                        if (speedMeasurements.length > MAX_SPEED_MEASUREMENTS) {
+                            speedMeasurements.shift();
+                        }
+                    }
+                    
+                    // Calculate average speed from measurements
+                    const avgBytesPerSecond = speedMeasurements.length > 0 
+                        ? speedMeasurements.reduce((a, b) => a + b, 0) / speedMeasurements.length 
+                        : bytesUploaded / elapsedSeconds;
+                    
+                    // Calculate time remaining estimate
+                    if (avgBytesPerSecond > 0 && bytesUploaded < fileSize) {
+                        const bytesRemaining = fileSize - bytesUploaded;
+                        const secondsRemaining = Math.ceil(bytesRemaining / avgBytesPerSecond);
+                        
+                        // Only show time remaining after a few seconds of upload
+                        if (elapsedSeconds > 2 && secondsRemaining > 0) {
+                            let timeRemainingText = '';
+                            
+                            if (secondsRemaining < 60) {
+                                timeRemainingText = `${secondsRemaining} sec remaining`;
+                            } else if (secondsRemaining < 3600) {
+                                const minutes = Math.ceil(secondsRemaining / 60);
+                                timeRemainingText = `${minutes} min remaining`;
+                            } else {
+                                const hours = Math.floor(secondsRemaining / 3600);
+                                const minutes = Math.ceil((secondsRemaining % 3600) / 60);
+                                timeRemainingText = `${hours}h ${minutes}m remaining`;
+                            }
+                            
+                            // Update progress bar text with time remaining
+                            elements.progressText.textContent = `${percent}% - ${timeRemainingText}`;
+                        } else {
+                            elements.progressText.textContent = percent + "% - " + getRandomFishPhrase();
+                        }
                     }
                     
                     // Update progress bar
                     elements.progressBar.style.width = percent + '%';
-                    
-                    // Update percentage in the phrase
-                    const currentText = elements.progressText.textContent;
-                    const dashIndex = currentText.indexOf("% -");
-                    if (dashIndex >= 0) {
-                        const newText = percent + currentText.substring(dashIndex);
-                        elements.progressText.textContent = newText;
-                    } else {
-                        elements.progressText.textContent = percent + "% - " + getRandomFishPhrase();
-                    }
                     
                     lastProgressUpdate = now;
                 }
@@ -735,8 +771,8 @@ function initializeUploader() {
                     await uploadChunkWithRateLimitRetry(chunkIndex);
                     completedChunks++;
                     
-                    // Update overall progress
-                    const totalProgress = Math.min(Math.round((completedChunks / totalChunks) * 100), 99);
+                    // Update overall progress based on completed chunks
+                    const totalProgress = Math.floor((completedChunks / totalChunks) * 95);
                     elements.progressBar.style.width = totalProgress + '%';
                 } catch (error) {
                     console.error(`Failed to upload chunk ${chunkIndex} after all retries:`, error);
@@ -798,6 +834,9 @@ function initializeUploader() {
             // If any chunk failed, the error would have been thrown
             
             // All chunks uploaded, finalize the upload
+            // Show that we're finalizing the upload
+            updateProgress(95, '95% - Finalizing upload...');
+            
             const finalizeData = new FormData();
             finalizeData.append('file_id', fileId);
             finalizeData.append('total_chunks', totalChunks);
@@ -809,37 +848,55 @@ function initializeUploader() {
             // Add CSRF token
             const csrfToken = ensureCsrfToken(finalizeData);
             
-            const finalizeResponse = await fetch('/upload/finalize', {
-                method: 'POST',
-                body: finalizeData,
-                headers: {
-                    'X-CSRF-Token': csrfToken,
-                    'X-Requested-With': 'XMLHttpRequest'
+            // Start finalization progress simulation
+            let finalizationProgress = 95;
+            const finalizationInterval = setInterval(() => {
+                finalizationProgress += 0.5;
+                if (finalizationProgress < 99) {
+                    elements.progressBar.style.width = finalizationProgress + '%';
+                    elements.progressText.textContent = Math.floor(finalizationProgress) + '% - Finalizing...';
                 }
-            });
+            }, 300);
             
-            if (!finalizeResponse.ok) {
-                throw new Error(`Failed to finalize upload: ${await finalizeResponse.text()}`);
+            try {
+                const finalizeResponse = await fetch('/upload/finalize', {
+                    method: 'POST',
+                    body: finalizeData,
+                    headers: {
+                        'X-CSRF-Token': csrfToken,
+                        'X-Requested-With': 'XMLHttpRequest'
+                    }
+                });
+                
+                // Clear the finalization animation
+                clearInterval(finalizationInterval);
+                
+                if (!finalizeResponse.ok) {
+                    throw new Error(`Failed to finalize upload: ${await finalizeResponse.text()}`);
+                }
+                
+                const result = await finalizeResponse.json();
+                
+                // Success! Show completion and redirect
+                uploadComplete = true;
+                updateProgress(100, '100% - Complete!');
+                
+                // Add a small delay before redirect to show the completion
+                setTimeout(() => {
+                    // Redirect with encryption key if needed
+                    if (encryptionKey) {
+                        window.location.href = result.redirect_url + '#' + encryptionKey;
+                    } else {
+                        window.location.href = result.redirect_url;
+                    }
+                }, 500);
+            } catch (error) {
+                // Clear the finalization animation if there was an error
+                clearInterval(finalizationInterval);
+                throw error; // Propagate the error to the outer catch block
             }
-            
-            const result = await finalizeResponse.json();
-            
-            // Success! Show completion and redirect
-            uploadComplete = true;
-            updateProgress(100, '100% - Complete!');
-            
-            // Add a small delay before redirect to show the completion
-            setTimeout(() => {
-                // Redirect with encryption key if needed
-                if (encryptionKey) {
-                    window.location.href = result.redirect_url + '#' + encryptionKey;
-                } else {
-                    window.location.href = result.redirect_url;
-                }
-            }, 500);
-            
         } catch (error) {
-            console.error('Chunked upload failed:', error);
+            console.error('Upload failed:', error);
             showError('Upload failed: ' + error.message);
         } finally {
             // Clear the phrase rotation interval
@@ -905,17 +962,49 @@ function initializeUploader() {
             errorContainer.style.display = 'none';
         }
 
-        // Apply transition for smoother animation
-        elements.progressBar.style.transition = 'width 0.3s ease-in-out';
-        
-        // Update progress bar width if percent is provided
-        if (percent !== null) {
-            elements.progressBar.style.width = percent + '%';
+        // Determine the current phase based on the text
+        let currentPhase = null;
+        if (text && text.includes('Encrypting')) {
+            currentPhase = 'encrypting';
+        } else if (text && (text.includes('Upload') || text.includes('Catching') || text.includes('%'))) {
+            currentPhase = 'uploading';
+        }
+
+        // Remove all phase classes and add the current one
+        document.body.classList.remove('encrypting-active', 'uploading-active');
+        if (currentPhase) {
+            document.body.classList.add(currentPhase + '-active');
+        }
+
+        // Update fish logo animation based on phase
+        const fishLogo = document.querySelector('.drop-zone-logo');
+        if (fishLogo) {
+            fishLogo.classList.remove('encrypting', 'uploading');
+            if (currentPhase) {
+                fishLogo.classList.add(currentPhase);
+            }
+        }
+
+        // Handle indefinite progress bar for encryption
+        if (currentPhase === 'encrypting') {
+            // Use indefinite progress bar
+            elements.progressBar.classList.add('indefinite');
+        } else {
+            // Use percentage-based progress bar
+            elements.progressBar.classList.remove('indefinite');
+            
+            // Apply transition for smoother animation
+            elements.progressBar.style.transition = 'width 0.3s ease-in-out';
+            
+            // Update progress bar width if percent is provided
+            if (percent !== null) {
+                elements.progressBar.style.width = percent + '%';
+            }
         }
 
         // Clear any existing phrase rotation interval if we're setting new text
         // but not during encryption rotation
-        if (text && !text.includes("Encrypting") && phrasesInterval) {
+        if (text && phrasesInterval) {
             clearInterval(phrasesInterval);
             phrasesInterval = null;
         }
@@ -923,20 +1012,46 @@ function initializeUploader() {
         // Update text with custom message or percentage
         if (text) {
             elements.progressText.textContent = text;
+            
+            // Start phrase rotation for encryption phase
+            if (currentPhase === 'encrypting' && !phrasesInterval) {
+                phrasesInterval = setInterval(function() {
+                    // Get a random phrase from the appropriate category
+                    const newPhrase = getRandomEncryptionPhrase();
+                    elements.progressText.textContent = newPhrase;
+                }, 5000);
+            } else if (currentPhase === 'uploading' && percent !== null && !phrasesInterval) {
+                // For uploading phase with percentage
+                phrasesInterval = setInterval(function() {
+                    const currentPercent = parseInt(elements.progressBar.style.width) || percent;
+                    const newPhrase = getRandomFishPhrase();
+                    elements.progressText.textContent = currentPercent + "% - " + newPhrase;
+                }, 5000);
+            }
         } else {
             // For regular progress, show fish phrases throughout
-            const randomFishPhrase = getRandomFishPhrase();
-            
             if (percent < 100) {
-                // Start rotating phrases immediately
-                elements.progressText.textContent = percent + "% - " + randomFishPhrase;
+                // Get phrase from the appropriate category based on phase
+                let randomPhrase;
+                if (currentPhase === 'encrypting') {
+                    randomPhrase = getRandomEncryptionPhrase();
+                    elements.progressText.textContent = randomPhrase;
+                } else {
+                    randomPhrase = getRandomFishPhrase();
+                    elements.progressText.textContent = percent + "% - " + randomPhrase;
+                }
                 
                 if (!phrasesInterval) {
                     // Start rotating phrases every 5 seconds
                     phrasesInterval = setInterval(function() {
-                        const currentPercent = parseInt(elements.progressBar.style.width) || percent;
-                        const newPhrase = getRandomFishPhrase();
-                        elements.progressText.textContent = currentPercent + "% - " + newPhrase;
+                        if (currentPhase === 'encrypting') {
+                            const newPhrase = getRandomEncryptionPhrase();
+                            elements.progressText.textContent = newPhrase;
+                        } else {
+                            const currentPercent = parseInt(elements.progressBar.style.width) || percent;
+                            const newPhrase = getRandomFishPhrase();
+                            elements.progressText.textContent = currentPercent + "% - " + newPhrase;
+                        }
                     }, 5000);
                 }
             } else {
