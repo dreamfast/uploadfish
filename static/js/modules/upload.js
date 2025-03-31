@@ -241,7 +241,6 @@ function initializeUploader() {
             this.options = {
                 chunkUrl: '/upload/chunk',
                 finalizeUrl: '/upload/finalize',
-                getCsrfToken: (formData) => '', // Expects function that takes formData and returns token string
                 getExpiry: () => '1h',
                 getIsEncrypted: () => 'false',
                 getSampleBase64: () => null,
@@ -264,6 +263,12 @@ function initializeUploader() {
             this.nextChunkIndex = 0;
             this.completedChunks = 0;
             this.finalizationInterval = null;
+            this.startTime = null;
+            this.controller = new AbortController(); // AbortController for cancelling
+            this.currentCsrfToken = null; // Initialize CSRF token state
+            this.finalChunkToken = null; // Token needed for finalization step
+            this.pendingTokens = {}; // Holds tokens received, keyed by the chunk index they unlock { 1: tokenFor1, 2: tokenFor2, ... }
+            this.dispatchedChunks = new Set(); // Tracks indices of dispatched chunks
         }
 
         _getOptimalChunkSize() {
@@ -337,7 +342,7 @@ function initializeUploader() {
             });
         }
 
-        async _uploadChunk(chunkIndex, retryCount = 0) {
+        async _uploadChunk(chunkIndex, chunkToken, retryCount = 0) {
             const start = chunkIndex * this.chunkSize;
             const end = Math.min(start + this.chunkSize, this.fileSize);
             const chunk = this.file.slice(start, end);
@@ -353,42 +358,121 @@ function initializeUploader() {
             formData.append('encrypted', this.options.getIsEncrypted());
             const sampleBase64 = this.options.getSampleBase64();
             if (chunkIndex === 0 && sampleBase64) { formData.append('encrypted_sample', sampleBase64); }
-            const csrfToken = this.options.getCsrfToken(formData);
-            try {
-                const response = await fetch(this.options.chunkUrl, {
-                    method: 'POST', body: formData, headers: { 'X-CSRF-Token': csrfToken, 'X-Requested-With': 'XMLHttpRequest' }
-                });
-                if (!response.ok) {
-                    let errorText = await response.text();
-                    try { const jsonError = JSON.parse(errorText); if (jsonError && jsonError.error) { errorText = jsonError.error; } } catch (e) { /* Ignore */ }
-                    throw new Error(`Server returned ${response.status}: ${errorText}`);
+
+            // We no longer use ensureCsrfToken here, using the instance state
+            // ensureCsrfToken(formData); // Removed
+
+            // --- Log token being sent ---
+            // console.log(`Chunk ${chunkIndex}: Sending with CSRF token:`, this.currentCsrfToken); // Removed log
+            // ---------------------------
+
+            const headers = {
+                'X-Requested-With': 'XMLHttpRequest',
+                'X-CSRF-Token': this.currentCsrfToken // Use the current CSRF token state
+            };
+
+            // Add chunk token header if not the first chunk
+            if (chunkIndex > 0) {
+                if (!chunkToken) { // Check passed parameter
+                    console.error(`Chunk ${chunkIndex}: Missing chunk token parameter for request.`);
+                    throw new Error(`Internal error: Missing chunk token parameter for chunk ${chunkIndex}`);
                 }
-                this._updateProgress(chunkActualSize);
-                return true;
-            } catch (error) {
-                console.error(`Error uploading chunk ${chunkIndex} (attempt ${retryCount + 1}):`, error);
-                const isRateLimit = error.message && error.message.includes('429');
-                if (!isRateLimit && retryCount < ChunkedUploader.MAX_RETRIES) {
-                    const delay = 1000 * (retryCount + 1);
-                    await new Promise(resolve => setTimeout(resolve, delay));
-                    return this._uploadChunk(chunkIndex, retryCount + 1);
-                }
-                throw error;
+                headers['X-Chunk-Token'] = chunkToken; // Use passed parameter
+                 console.log(`Chunk ${chunkIndex}: Sending with Chunk token:`, chunkToken.substring(0, 10) + "..."); // Log prefix
             }
+
+            const response = await fetch(this.options.chunkUrl, {
+                method: 'POST',
+                body: formData,
+                headers: headers,
+                signal: this.controller.signal
+            });
+            if (!response.ok) {
+                let errorText = await response.text();
+                try { const jsonError = JSON.parse(errorText); if (jsonError && jsonError.error) { errorText = jsonError.error; } } catch (e) { /* Ignore */ }
+                throw new Error(`Server returned ${response.status}: ${errorText}`);
+            }
+            // Restore parsing of the JSON response
+            const responseData = await response.json();
+
+            // --- Store token(s) in Map ---
+            let tokensReceived = [];
+            let startIndex = -1; // Index the first token in the array corresponds to
+
+            if (chunkIndex === 0 && responseData.initial_chunk_tokens && Array.isArray(responseData.initial_chunk_tokens)) {
+                // Handle initial batch of tokens from chunk 0 response
+                tokensReceived = responseData.initial_chunk_tokens;
+                startIndex = 1; // Tokens are for chunks 1, 2, 3...
+                console.log(`Chunk 0: Received ${tokensReceived.length} initial tokens.`);
+            } else if (chunkIndex > 0 && responseData.next_chunk_tokens && Array.isArray(responseData.next_chunk_tokens)) {
+                 // Handle subsequent batch of tokens from chunk > 0 response
+                 tokensReceived = responseData.next_chunk_tokens;
+                 startIndex = chunkIndex + 1; // Tokens are for chunks N+1, N+2, N+3...
+                 console.log(`Chunk ${chunkIndex}: Received ${tokensReceived.length} next tokens.`);
+            } else {
+                 console.log(`Chunk ${chunkIndex}: Response did not contain expected token array.`);
+                 // If a chunk response is missing tokens (and it's not near the end), something is wrong
+                 // We might need more robust error checking here depending on expected server behavior
+            }
+
+            // Process the received tokens
+            if (startIndex !== -1 && tokensReceived.length > 0) {
+                tokensReceived.forEach((token, arrayIndex) => {
+                    const tokenForIndex = startIndex + arrayIndex;
+                    if (tokenForIndex <= this.totalChunks) { // Only store if valid index
+                         this.pendingTokens[tokenForIndex] = token;
+                         console.log(`Stored token for chunk ${tokenForIndex}:`, token.substring(0, 10) + "...");
+                         // Check if this is the final token needed
+                         if (tokenForIndex === this.totalChunks) {
+                             this.finalChunkToken = token;
+                             console.log(`>>> Stored FINAL token (for chunk ${tokenForIndex})`);
+                         }
+                    }
+                });
+            }
+            
+            // Always trigger dispatcher after processing response
+            this._attemptToDispatchChunks(); 
+            // ------------------------------------
+
+            this._updateProgress(chunkActualSize);
+            return true;
         }
 
-        async _uploadChunkWithRateLimitRetry(chunkIndex, maxRateLimitRetries = ChunkedUploader.MAX_RETRIES + 2) {
+        async _uploadChunkWithRateLimitRetry(chunkIndex, chunkToken) {
             let retryCount = 0;
-            while (true) {
-                try { return await this._uploadChunk(chunkIndex); } catch (error) {
-                    if (error.message && error.message.includes('429')) {
-                        retryCount++;
-                        if (retryCount >= maxRateLimitRetries) throw new Error(`Failed chunk ${chunkIndex} after ${maxRateLimitRetries} rate limit retries`);
-                        const delay = Math.min(Math.pow(1.5, retryCount) * 1000, 15000);
-                        console.warn(`Rate limit hit on chunk ${chunkIndex}. Retrying in ${delay / 1000}s... (${retryCount}/${maxRateLimitRetries})`);
-                        await new Promise(resolve => setTimeout(resolve, delay));
-                    } else { throw error; }
-                }
+            try {
+                while (true) {
+                    try { 
+                        const success = await this._uploadChunk(chunkIndex, chunkToken);
+                        if (success) {
+                            this.completedChunks++;
+                            await this._checkCompletion();
+                        }
+                        return success; // Return true from the retry loop on success
+                    } catch (error) {
+                        if (error.message && error.message.includes('429')) {
+                            retryCount++;
+                            if (retryCount >= ChunkedUploader.MAX_RETRIES + 2) throw new Error(`Failed chunk ${chunkIndex} after ${ChunkedUploader.MAX_RETRIES + 2} rate limit retries`);
+                            const delay = Math.min(Math.pow(1.5, retryCount) * 1000, 15000);
+                            console.warn(`Rate limit hit on chunk ${chunkIndex}. Retrying in ${delay / 1000}s... (${retryCount}/${ChunkedUploader.MAX_RETRIES + 2})`);
+                            await new Promise(resolve => setTimeout(resolve, delay));
+                        } else { throw error; } // Re-throw non-rate-limit errors
+                    }
+                } // End while loop
+            } catch (error) {
+                 if (!this.uploadComplete) { 
+                      this.uploadComplete = true; 
+                      this.options.onError(error); // Propagate error
+                      this.controller.abort(); // Abort on failure
+                 }
+                 // Ensure error is propagated if needed by caller
+                 throw error; 
+            } finally {
+                this.activeUploads--; // Decrement active count when this attempt concludes
+                console.log(`Chunk ${chunkIndex} finished/failed. Active uploads: ${this.activeUploads}`);
+                // Try to dispatch another chunk now that a slot is free
+                this._attemptToDispatchChunks(); 
             }
         }
 
@@ -401,81 +485,201 @@ function initializeUploader() {
             finalizeData.append('file_size', this.fileSize);
             finalizeData.append('expiry', this.options.getExpiry());
             finalizeData.append('encrypted', this.options.getIsEncrypted());
-            const csrfToken = this.options.getCsrfToken(finalizeData);
-            let finalizationProgress = ChunkedUploader.FINALIZATION_START_PERCENT;
-            if(this.finalizationInterval) clearInterval(this.finalizationInterval); // Clear previous just in case
-            this.finalizationInterval = setInterval(() => {
-                finalizationProgress += 0.5;
-                if (finalizationProgress < 99) { this.options.onProgress({ percent: Math.floor(finalizationProgress), statusText: 'Finalizing...' }); }
-                else { if (this.finalizationInterval) clearInterval(this.finalizationInterval); this.finalizationInterval = null; }
-            }, 300);
-            try {
-                const finalizeResponse = await fetch(this.options.finalizeUrl, {
-                    method: 'POST', body: finalizeData, headers: { 'X-CSRF-Token': csrfToken, 'X-Requested-With': 'XMLHttpRequest' }
-                });
-                if (this.finalizationInterval) clearInterval(this.finalizationInterval); this.finalizationInterval = null;
-                if (!finalizeResponse.ok) {
-                    let errorText = await finalizeResponse.text();
-                    try { const jsonError = JSON.parse(errorText); if (jsonError && jsonError.error) { errorText = jsonError.error; } } catch (e) { /* Ignore */ }
-                    throw new Error(`Failed to finalize upload: ${errorText}`);
+
+            // We no longer use ensureCsrfToken here, using the instance state
+            // ensureCsrfToken(finalizeData); // Removed
+
+            // --- Add final Chunk Token header ---
+            const headers = {
+                'X-Requested-With': 'XMLHttpRequest',
+                'X-CSRF-Token': this.currentCsrfToken // Use the current CSRF token
+            };
+            if (!this.finalChunkToken) {
+                console.error("Finalize: Missing final chunk token for request.");
+                throw new Error("Internal error: Missing chunk token for finalization");
+            }
+            headers['X-Chunk-Token'] = this.finalChunkToken; // Send the final chunk token
+            console.log("Finalize: Sending with Final Chunk token:", this.finalChunkToken.substring(0, 10) + "...");
+            // -----------------------------------
+
+            const response = await fetch(this.options.finalizeUrl, {
+                method: 'POST',
+                body: finalizeData,
+                headers: headers,
+                signal: this.controller.signal // Allow aborting finalization too
+            });
+            if (!response.ok) {
+                let errorText = await response.text();
+                try { const jsonError = JSON.parse(errorText); if (jsonError && jsonError.error) { errorText = jsonError.error; } } catch (e) { /* Ignore */ }
+                throw new Error(`Failed to finalize upload: ${errorText}`);
+            }
+            const result = await response.json();
+            this.uploadComplete = true;
+            this.options.onProgress({ percent: 100, statusText: 'Complete!' });
+            this.options.onSuccess(result);
+        }
+
+        // New dispatcher logic using Set and pendingTokens map
+        _attemptToDispatchChunks() {
+             console.log(`Attempting dispatch. Active: ${this.activeUploads}, Max: ${ChunkedUploader.MAX_CONCURRENT_UPLOADS}, Dispatched: ${this.dispatchedChunks.size}, Total: ${this.totalChunks}`);
+             
+             while (this.activeUploads < ChunkedUploader.MAX_CONCURRENT_UPLOADS && this.dispatchedChunks.size < this.totalChunks) {
+                 let foundChunkToDispatch = -1;
+                 // Find the lowest index chunk that hasn't been dispatched AND has its token ready
+                 for (let i = 0; i < this.totalChunks; i++) {
+                      if (!this.dispatchedChunks.has(i)) {
+                          const isChunk0 = (i === 0);
+                          const tokenNeeded = isChunk0 || this.pendingTokens[i];
+                          if (tokenNeeded) {
+                              foundChunkToDispatch = i;
+                              break; // Found the lowest index ready chunk
+                          }
+                      }
+                 }
+
+                if (foundChunkToDispatch !== -1) {
+                    // Token is available (or it's chunk 0)
+                    const indexToDispatch = foundChunkToDispatch;
+                    const isChunk0 = (indexToDispatch === 0);
+                    const tokenToSend = isChunk0 ? null : this.pendingTokens[indexToDispatch];
+                    
+                    console.log(`Token found for chunk ${indexToDispatch}. Dispatching.`);
+                    if (!isChunk0) {
+                        delete this.pendingTokens[indexToDispatch]; // Consume token
+                    }
+
+                    this.activeUploads++;
+                    this.dispatchedChunks.add(indexToDispatch); // Mark as dispatched
+                    
+                    // Start upload asynchronously
+                    this._uploadChunkWithRateLimitRetry(indexToDispatch, tokenToSend)
+                       .catch(err => {
+                            // Catch errors specifically from the async upload process if not handled deeper
+                            if (!this.controller.signal.aborted) {
+                                 console.error(`Error caught after dispatching chunk ${indexToDispatch}:`, err);
+                            }
+                       });
+                } else {
+                    // No chunk found whose token is ready and hasn't been dispatched
+                    console.log(`No ready chunk found to dispatch. Waiting.`);
+                    break; 
                 }
-                const result = await finalizeResponse.json();
-                this.uploadComplete = true;
-                this.options.onProgress({ percent: 100, statusText: 'Complete!' });
-                this.options.onSuccess(result);
-            } catch (error) {
-                if (this.finalizationInterval) clearInterval(this.finalizationInterval); this.finalizationInterval = null;
-                console.error("Finalization failed:", error);
-                this.uploadComplete = true;
-                throw error;
+            }
+             console.log(`Dispatch loop finished. Active: ${this.activeUploads}, Dispatched: ${this.dispatchedChunks.size}`);
+        }
+
+        // Check if upload is complete and finalize
+        async _checkCompletion() {
+            if (this.completedChunks === this.totalChunks && !this.uploadComplete) {
+                 console.log("All chunks completed, attempting finalization...");
+                 try { 
+                      await this._finalizeUpload(); 
+                      // Success is handled within _finalizeUpload via options.onSuccess
+                 } catch (err) { 
+                      if (!this.uploadComplete) {
+                           this.uploadComplete = true;
+                           this.options.onError(err); // Propagate finalization error
+                           this.controller.abort();
+                      }
+                 } 
             }
         }
 
         async start() {
-            this.uploadStartTime = Date.now(); this.lastProgressUpdate = this.uploadStartTime;
-            this.uploadComplete = false; this.bytesUploaded = 0; this.completedChunks = 0;
-            this.nextChunkIndex = 0; this.activeUploads = 0; this.speedMeasurements = [];
+            // Reset state for potential restart
+            this.resetState(); 
+
+            // Abort any previous upload attempts controlled by this instance
+            if (this.controller && !this.controller.signal.aborted) {
+                this.controller.abort();
+                console.log("Aborted previous upload controller.");
+            }
+            // Create a new controller for this upload attempt
+            this.controller = new AbortController();
+
+            this.startTime = performance.now();
+            // this.fileId = this._generateUUID(); // REMOVED - fileId is set in constructor
+
+            // --- Initialize CSRF Token ---
+            const csrfInput = document.getElementById('formCsrfToken');
+            if (!csrfInput || !csrfInput.value) {
+                this.options.onError('CSRF token input #formCsrfToken not found on page.');
+                return;
+            }
+            this.currentCsrfToken = csrfInput.value;
+            // console.log("Initialized CSRF token for upload:", this.currentCsrfToken); // Removed log
+            // ---------------------------
+
+            // Calculate chunk size and reset state
+            this.chunkSize = this._getOptimalChunkSize();
+            this.totalChunks = Math.ceil(this.fileSize / this.chunkSize);
+            this.bytesUploaded = 0;
+            this.completedChunks = 0;
+            this.nextChunkIndex = 0; // Index of the next chunk to *dispatch*
+            this.activeUploads = 0; 
+            this.finalChunkToken = null;
+            this.pendingTokens = {}; // Reset token map
+            this.dispatchedChunks = new Set(); // Reset dispatched set
+            this.uploadComplete = false;
+            this.uploadStartTime = Date.now(); 
+            this.lastProgressUpdate = this.uploadStartTime;
+            this.speedMeasurements = [];
+
+            console.log(`Starting upload: ${this.fileId}, Size: ${this.fileSize}, Chunks: ${this.totalChunks}, Chunk Size: ${this.chunkSize}`);
             this._updateProgress(); // Initial 0%
-            if (this.fileSize === 0 && this.totalChunks === 0) {
+
+            // Handle empty file case
+            if (this.fileSize === 0) {
                 console.log("File is empty, finalizing immediately.");
-                return this._finalizeUpload().catch(err => { this.options.onError(err); throw err; });
+                 try {
+                      // Empty files don't need a chunk token for finalization?
+                      // Assuming finalize needs a token derived from chunk 0 if it existed.
+                      // Let's adjust the backend finalize to handle this case? Or send a dummy token?
+                      // For now, let's assume finalize bypasses chunk token check for size 0.
+                      // OR: we need to simulate chunk 0 token generation.
+                      // Let's try simulating token generation for empty file.
+                      this.finalChunkToken = "EMPTY_FILE_TOKEN"; // Placeholder - needs backend adjustment
+                      await this._finalizeUpload();
+                 } catch(err) {
+                      this.options.onError(err);
+                 }
+                 return; // Upload finished
             }
-            if (this.totalChunks <= 0 && this.fileSize > 0) {
-                const err = new Error(`Cannot process file: Size=${this.fileSize}, Chunks=${this.totalChunks}`);
-                this.options.onError(err); throw err;
-            }
-            return new Promise((resolve, reject) => {
-                const overallError = null;
-                const checkCompletion = async () => {
-                    if (this.completedChunks === this.totalChunks && !this.uploadComplete) {
-                         try { await this._finalizeUpload(); resolve(); } catch (err) { reject(err); }
-                    }
-                };
-                const uploadNextChunk = async () => {
-                    if (this.nextChunkIndex >= this.totalChunks || this.uploadComplete) return;
-                    const chunkIndexToUpload = this.nextChunkIndex++;
-                    this.activeUploads++;
-                    try {
-                        await this._uploadChunkWithRateLimitRetry(chunkIndexToUpload);
-                        if (this.uploadComplete) return; // Stop if failed during await
-                        this.completedChunks++;
-                        await checkCompletion();
-                    } catch (error) {
-                        if (!this.uploadComplete) { this.uploadComplete = true; reject(error); }
-                    } finally {
-                        this.activeUploads--;
-                        if (!this.uploadComplete && this.activeUploads < ChunkedUploader.MAX_CONCURRENT_UPLOADS) {
-                            setTimeout(uploadNextChunk, 5);
-                        }
-                    }
-                };
-                const initialUploads = Math.min(ChunkedUploader.MAX_CONCURRENT_UPLOADS, this.totalChunks);
-                for (let i = 0; i < initialUploads; i++) { setTimeout(uploadNextChunk, i * 20); }
-            }).catch(error => {
-                 if (!this.uploadComplete) { this.uploadComplete = true; this.options.onError(error); }
-                 console.error("Upload process failed:", error);
-                 // Don't re-throw here, let the initial caller handle promise rejection if needed
-            });
+            
+            // Validate chunk calculation
+             if (this.totalChunks <= 0 && this.fileSize > 0) {
+                 const err = new Error(`Cannot process file: Size=${this.fileSize}, Chunks=${this.totalChunks}`);
+                 this.options.onError(err); 
+                 return;
+             }
+
+            // Initial dispatch loop - uses _attemptToDispatchChunks
+            console.log(`Starting initial dispatch...`);
+            this._attemptToDispatchChunks(); // Kick off the upload process
+        }
+
+        stop() {
+            this.controller.abort();
+        }
+
+        resetState() {
+            // Reset all instance variables to their initial state
+            this.bytesUploaded = 0;
+            this.completedChunks = 0;
+            this.nextChunkIndex = 0;
+            this.activeUploads = 0;
+            this.finalChunkToken = null;
+            this.pendingTokens = {};
+            this.dispatchedChunks = new Set();
+            this.uploadComplete = false;
+            this.uploadStartTime = 0;
+            this.lastProgressUpdate = 0;
+            this.speedMeasurements = [];
+            this.controller = new AbortController();
+            this.startTime = null;
+            this.currentCsrfToken = null;
+            this.chunkSize = this._getOptimalChunkSize();
+            this.totalChunks = Math.ceil(this.fileSize / this.chunkSize);
         }
     }
     // --- End ChunkedUploader Class ---
@@ -517,7 +721,6 @@ function initializeUploader() {
 
                 // Instantiate and start the uploader
                 uploader = new ChunkedUploader(encryptedFile, {
-                    getCsrfToken: ensureCsrfToken,
                     getExpiry: () => elements.formExpiryInput.value,
                     getIsEncrypted: () => 'true',
                     getSampleBase64: () => sampleBase64, // Provide the sample
@@ -575,7 +778,6 @@ function initializeUploader() {
 
         setTimeout(() => {
             const uploader = new ChunkedUploader(file, {
-                getCsrfToken: ensureCsrfToken,
                 getExpiry: () => elements.formExpiryInput.value,
                 getIsEncrypted: () => 'false', // Explicitly false
                 onProgress: (progress) => {
@@ -608,29 +810,6 @@ function initializeUploader() {
              });
 
         }, 50); // End setTimeout
-    }
-
-    // Ensure CSRF token is included (remains in initializeUploader scope)
-    function ensureCsrfToken(formData) { // Now accepts formData to set the token
-        // Always get the most current token from the DOM
-        const csrfTokenInput = document.getElementById('formCsrfToken');
-        let csrfToken = '';
-        
-        if (csrfTokenInput && csrfTokenInput.value) {
-            csrfToken = csrfTokenInput.value;
-        } else {
-            // As a fallback, try to parse it from the cookie
-            const csrfCookie = document.cookie.split('; ').find(row => row.startsWith('csrf_token='));
-            if (csrfCookie) {
-                csrfToken = csrfCookie.split('=')[1];
-            } else {
-                console.error('No CSRF token found in form or cookie');
-            }
-        }
-        
-        // Always set the csrf token in the form data
-        formData.set('csrf_token', csrfToken);
-        return csrfToken;
     }
 
     // Update progress bar (Now uses helpers)

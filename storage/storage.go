@@ -1,13 +1,16 @@
 package storage
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/klauspost/compress/gzip"
 	"github.com/prologic/bitcask"
 
 	"uploadfish/config"
@@ -75,28 +78,24 @@ func New(cfg *config.Config, logger Logger) (*Storage, error) {
 	return s, nil
 }
 
-// SaveFile saves file metadata and content to the database
-func (s *Storage) SaveFile(file *models.File) error {
+// SaveFile saves file metadata and streams content to the database
+func (s *Storage) SaveFile(fileMetadata *models.File, contentReader io.Reader) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
 	// Generate UUID if not set
-	if file.ID == "" {
-		file.ID = uuid.New().String()
+	if fileMetadata.ID == "" {
+		fileMetadata.ID = uuid.New().String()
 	}
 
 	// Set upload time if not set
-	if file.UploadTime.IsZero() {
-		file.UploadTime = time.Now()
+	if fileMetadata.UploadTime.IsZero() {
+		fileMetadata.UploadTime = time.Now()
 	}
 
-	// Extract content before marshaling to JSON
-	content := file.Content
-	file.Content = nil // Don't store content in metadata
-
 	// Convert metadata to JSON
-	metadataKey := []byte(metadataPrefix + file.ID)
-	metadataValue, err := file.ToJSON()
+	metadataKey := []byte(metadataPrefix + fileMetadata.ID)
+	metadataValue, err := fileMetadata.ToJSON()
 	if err != nil {
 		return fmt.Errorf("failed to marshal file metadata: %w", err)
 	}
@@ -106,18 +105,37 @@ func (s *Storage) SaveFile(file *models.File) error {
 		return fmt.Errorf("failed to save file metadata: %w", err)
 	}
 
-	// If we have content to save
-	if len(content) > 0 {
-		contentKey := []byte(contentPrefix + file.ID)
+	// Save content by streaming and compressing
+	if contentReader != nil {
+		contentKey := []byte(contentPrefix + fileMetadata.ID)
 
-		// Compress the content
-		compressedContent, err := utils.Compress(content)
+		// Use a pipe to connect the gzip writer to an io.Reader for Bitcask
+		// Alternatively, buffer in memory if Bitcask needs a byte slice.
+		// Let's buffer for simplicity with Bitcask Put, but acknowledge this
+		// still uses memory proportional to the *compressed* size.
+		var compressedBuf bytes.Buffer
+		gz := gzip.NewWriter(&compressedBuf)
+
+		// Copy from the source reader, through gzip, into the buffer
+		written, err := io.Copy(gz, contentReader)
 		if err != nil {
+			_ = s.db.Delete(metadataKey) // Rollback metadata
+			return fmt.Errorf("failed during file content compression: %w", err)
+		}
+		if err := gz.Close(); err != nil { // Important: Close gzip writer
+			_ = s.db.Delete(metadataKey)
 			return fmt.Errorf("failed to compress file content: %w", err)
 		}
 
-		// Save compressed content to database
-		if err := s.db.Put(contentKey, compressedContent); err != nil {
+		s.logger.Info("Compressed content stream", map[string]interface{}{
+			"file_id":               fileMetadata.ID,
+			"original_size":         fileMetadata.Size, // Assuming this was set correctly before calling
+			"compressed_size":       compressedBuf.Len(),
+			"bytes_written_to_gzip": written,
+		})
+
+		// Save compressed content buffer to database
+		if err := s.db.Put(contentKey, compressedBuf.Bytes()); err != nil {
 			// Try to delete metadata if content save fails
 			_ = s.db.Delete(metadataKey)
 			return fmt.Errorf("failed to save file content: %w", err)

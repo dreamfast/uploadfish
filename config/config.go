@@ -34,7 +34,7 @@ func New() *Config {
 		RateLimit:        getEnvAsInt("RATE_LIMIT", 60),                         // 60 requests per window
 		RateLimitWindow:  getEnvAsDuration("RATE_LIMIT_WINDOW", 1*time.Minute),  // 1 minute window
 		RateLimitCleanup: getEnvAsDuration("RATE_LIMIT_CLEANUP", 5*time.Minute), // Clean up every 5 minutes
-		CSRFExpiration:   getEnvAsDuration("CSRF_EXPIRATION", 1*time.Hour),      // CSRF tokens expire after 1 hour
+		CSRFExpiration:   getEnvAsDuration("CSRF_EXPIRATION", 12*time.Hour),     // CSRF tokens expire after 12 hours (increased)
 	}
 
 	// Override with environment variables if available

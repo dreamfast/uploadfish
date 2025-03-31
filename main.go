@@ -105,7 +105,7 @@ func main() {
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   []string{cfg.BaseURL},
 		AllowedMethods:   []string{"GET", "POST", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Content-Type", "Range", "X-CSRF-Token", "X-Requested-With"},
+		AllowedHeaders:   []string{"Accept", "Content-Type", "Range", "X-CSRF-Token", "X-Requested-With", "X-Chunk-Token"},
 		AllowCredentials: true,
 		MaxAge:           300,
 	}))

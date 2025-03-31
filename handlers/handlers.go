@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -12,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"uploadfish/config"
@@ -29,6 +29,16 @@ type Handler struct {
 	Templates      *template.Template
 	Storage        *storage.Storage
 	csrfProtection *utils.CSRFProtection
+	// State for tracking chunked uploads
+	chunkStates   map[string]*chunkState
+	chunkStatesMu sync.Mutex
+}
+
+// chunkState holds the validation state for an ongoing chunked upload
+type chunkState struct {
+	NextIndex    int       // The index of the next expected chunk
+	UploadSecret string    // Secret key used for HMAC token generation for this upload
+	LastUpdated  time.Time // Timestamp for cleaning up stale entries
 }
 
 // New creates a new Handler with the given configuration
@@ -56,11 +66,42 @@ func New(cfg *config.Config, store *storage.Storage, csrfProtection *utils.CSRFP
 		},
 	}).ParseGlob("templates/*.html"))
 
-	return &Handler{
+	h := &Handler{
 		Config:         cfg,
 		Templates:      tmpl,
 		Storage:        store,
 		csrfProtection: csrfProtection,
+		// Initialize the chunk state map
+		chunkStates: make(map[string]*chunkState),
+	}
+
+	// Start cleanup routine for chunk states
+	go h.cleanupStaleChunkStates(3 * time.Hour) // Clean up entries older than 3 hours
+
+	return h
+}
+
+// cleanupStaleChunkStates periodically removes old chunk state entries
+func (h *Handler) cleanupStaleChunkStates(maxAge time.Duration) {
+	ticker := time.NewTicker(30 * time.Minute) // Check every 30 minutes
+	defer ticker.Stop()
+
+	for range ticker.C {
+		h.chunkStatesMu.Lock()
+		now := time.Now()
+		cleanedCount := 0
+		for fileID, state := range h.chunkStates {
+			if now.Sub(state.LastUpdated) > maxAge {
+				delete(h.chunkStates, fileID)
+				cleanedCount++
+			}
+		}
+		if cleanedCount > 0 {
+			LogInfo("Cleaned up stale chunk states", map[string]interface{}{
+				"count": cleanedCount,
+			})
+		}
+		h.chunkStatesMu.Unlock()
 	}
 }
 
@@ -135,7 +176,7 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Save to storage
-	if err := h.Storage.SaveFile(fileMetadata); err != nil {
+	if err := h.Storage.SaveFile(fileMetadata, file); err != nil {
 		LogError(err, "Error saving file", map[string]interface{}{
 			"file_id":   fileMetadata.ID,
 			"file_size": fileMetadata.Size,
@@ -259,21 +300,24 @@ func (h *Handler) processUploadedFile(file io.ReadSeeker, handler *multipart.Fil
 		"file_id": fileID,
 	})
 
-	// Read file content
-	content, err := io.ReadAll(file)
+	// Get file size by seeking
+	size, err := file.Seek(0, io.SeekEnd) // Seek to end to get size
 	if err != nil {
-		LogError(err, "Error reading file content", nil)
-		return nil, fmt.Errorf("error reading file: %v", err)
+		LogError(err, "Error seeking to end of file to get size", nil)
+		return nil, fmt.Errorf("error processing file: %v", err)
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil { // Seek back to start
+		LogError(err, "Error seeking back to start of file", nil)
+		return nil, fmt.Errorf("error processing file: %v", err)
 	}
 
 	return &models.File{
 		ID:              fileID,
 		Filename:        sanitizeFilename(handler.Filename),
 		MimeType:        contentType,
-		Size:            int64(len(content)),
+		Size:            size, // Use size obtained from seeking
 		UploadTime:      time.Now(),
 		ExpiryTime:      expiryTime,
-		Content:         content,
 		IsEncrypted:     isEncrypted,
 		EncryptedSample: encryptedSample,
 	}, nil
@@ -680,6 +724,32 @@ func (h *Handler) renderTemplate(w http.ResponseWriter, r *http.Request, templat
 	}
 }
 
+// validateChunkCSRF checks CSRF token leniently for chunk/finalize uploads
+func (h *Handler) validateChunkCSRF(w http.ResponseWriter, r *http.Request) bool {
+	csrfToken := r.FormValue("csrf_token")
+	if csrfToken == "" {
+		csrfToken = r.Header.Get("X-CSRF-Token")
+	}
+
+	cookie, err := r.Cookie("csrf_token")
+
+	// Condition 1: Standard Double Submit Check
+	if err == nil && csrfToken != "" && h.csrfProtection.ValidateToken(csrfToken, cookie.Value) {
+		// Valid token and cookie match
+		return true
+	} else {
+		// No valid token/cookie match - reject
+		LogInfo("Invalid CSRF protection for chunk/finalize upload", map[string]interface{}{
+			"ip":             r.RemoteAddr,
+			"path":           r.URL.Path,
+			"token_present":  csrfToken != "",
+			"cookie_present": err == nil,
+		})
+		jsonError(w, "Invalid or missing CSRF token. Please refresh the page and try again.", http.StatusForbidden)
+		return false
+	}
+}
+
 // ChunkUpload handles individual chunk uploads in a chunked file upload process
 func (h *Handler) ChunkUpload(w http.ResponseWriter, r *http.Request) {
 	// Set a much larger chunk size limit to accommodate dynamic chunk sizing
@@ -696,42 +766,8 @@ func (h *Handler) ChunkUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// For AJAX requests from the same origin, be more lenient with CSRF validation
-	csrfToken := r.FormValue("csrf_token")
-	if csrfToken == "" {
-		csrfToken = r.Header.Get("X-CSRF-Token")
-	}
-
-	// Check if we have a CSRF cookie
-	cookie, err := r.Cookie("csrf_token")
-
-	// For chunked uploads, we'll accept requests that:
-	// 1. Have a valid token+cookie match, OR
-	// 2. Have the X-Requested-With header set to XMLHttpRequest (AJAX request)
-	//    AND Origin header matching our domain (or no Origin header for same-origin requests)
-	isXhr := r.Header.Get("X-Requested-With") == "XMLHttpRequest"
-	origin := r.Header.Get("Origin")
-	sameOrigin := origin == "" || strings.HasPrefix(origin, h.getBaseURL(r))
-
-	if err == nil && csrfToken != "" && h.csrfProtection.ValidateToken(csrfToken, cookie.Value) {
-		// Valid CSRF token and cookie match - this is the normal, secure case
-	} else if isXhr && sameOrigin {
-		// AJAX request from same origin - we'll be more lenient
-		LogInfo("AJAX request from same origin, being lenient with CSRF check", map[string]interface{}{
-			"ip":     r.RemoteAddr,
-			"xhr":    isXhr,
-			"origin": origin,
-		})
-	} else {
-		// Neither case matched - reject the request
-		LogInfo("Invalid CSRF protection for chunk upload", map[string]interface{}{
-			"ip":             r.RemoteAddr,
-			"token_present":  csrfToken != "",
-			"cookie_present": err == nil,
-			"xhr":            isXhr,
-			"origin":         origin,
-		})
-		jsonError(w, "Invalid or missing CSRF token. Please refresh the page and try again.", http.StatusForbidden)
+	// Validate main CSRF token first
+	if !h.validateChunkCSRF(w, r) {
 		return
 	}
 
@@ -770,6 +806,117 @@ func (h *Handler) ChunkUpload(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, fmt.Sprintf("File too large. Maximum size is %d MB.", h.Config.MaxUploadSize/(1<<20)), http.StatusBadRequest)
 		return
 	}
+
+	// --- Chunk Token Validation & Generation ---
+	var initialTokens []string // For chunk 0 response
+	var nextTokens []string    // For subsequent chunks
+
+	h.chunkStatesMu.Lock() // Lock before accessing shared state
+
+	if chunkIndex == 0 {
+		// First chunk: Generate initial chunk secret and calculate tokens for the initial concurrent batch
+		uploadSecret := utils.GenerateRandomString(32) // Secret for this upload session
+
+		numTokensToSend := totalChunks
+		if numTokensToSend > 3 {
+			numTokensToSend = 3
+		}
+
+		if numTokensToSend > 0 {
+			initialTokens = make([]string, 0, numTokensToSend)
+			for i := 1; i <= numTokensToSend; i++ {
+				// Ensure we don't generate beyond totalChunks
+				if i <= totalChunks {
+					token := utils.GenerateHMAC(uploadSecret, fmt.Sprintf("chunk%d", i))
+					initialTokens = append(initialTokens, token)
+				}
+			}
+		}
+
+		h.chunkStates[fileID] = &chunkState{
+			NextIndex:    1, // Server still expects chunk 1 next
+			UploadSecret: uploadSecret,
+			LastUpdated:  time.Now(),
+		}
+		// nextTokens remains empty for chunk 0 response
+		LogInfo("Initialized chunk state for upload", map[string]interface{}{
+			"file_id":              fileID,
+			"next_chunk_index":     1,
+			"initial_tokens_count": len(initialTokens),
+		})
+	} else {
+		// Subsequent chunks: Validate incoming token and index
+		state, exists := h.chunkStates[fileID]
+		if !exists {
+			h.chunkStatesMu.Unlock()
+			LogInfo("Chunk state not found for file ID", map[string]interface{}{"file_id": fileID, "chunk": chunkIndex})
+			jsonError(w, "Invalid upload state or file ID.", http.StatusBadRequest)
+			return
+		}
+
+		// Get token from header
+		chunkToken := r.Header.Get("X-Chunk-Token")
+
+		// --- Add Detailed Logging Inside Lock ---
+		LogInfo("Backend validating chunk (inside lock)", map[string]interface{}{
+			"file_id":               fileID,
+			"incoming_chunk_index":  chunkIndex,
+			"state_next_index":      state.NextIndex,
+			"state_secret_prefix":   state.UploadSecret[:min(5, len(state.UploadSecret))] + "...", // Log prefix only
+			"incoming_token_prefix": chunkToken[:min(10, len(chunkToken))] + "...",                // Log prefix only
+		})
+		// --------------------------------------
+
+		// Validate token using HMAC (Removed index check to allow concurrency)
+		expectedToken := utils.GenerateHMAC(state.UploadSecret, fmt.Sprintf("chunk%d", chunkIndex))
+		if chunkToken != expectedToken {
+			h.chunkStatesMu.Unlock()
+			LogInfo("Chunk validation failed (Token mismatch)", map[string]interface{}{
+				"file_id":           fileID,
+				"received_index":    chunkIndex,
+				"expected_index":    state.NextIndex, // Log expected index for info
+				"received_token_ok": false,           // Token check failed
+			})
+			// Optionally delete state here?
+			// delete(h.chunkStates, fileID)
+			jsonError(w, fmt.Sprintf("Invalid chunk token for index %d.", chunkIndex), http.StatusForbidden)
+			return
+		}
+
+		// Validation passed: Generate batch of tokens for subsequent chunks
+		startIndex := chunkIndex + 1 // First token to generate is for the chunk after the current one
+		endIndex := chunkIndex + 3   // Look ahead by 3 chunks
+		if endIndex > totalChunks {  // Don't generate beyond the last chunk/finalize step
+			endIndex = totalChunks
+		}
+
+		// Use nextTokens (plural) for the array
+		nextTokens = nil // Explicitly reset the slice for this request
+		if startIndex <= endIndex {
+			nextTokens = make([]string, 0, endIndex-startIndex+1) // Assign to the function-scoped variable
+			for i := startIndex; i <= endIndex; i++ {
+				token := utils.GenerateHMAC(state.UploadSecret, fmt.Sprintf("chunk%d", i))
+				nextTokens = append(nextTokens, token) // Append to the function-scoped variable
+			}
+		}
+
+		// IMPORTANT: Strictly increment NextIndex only if the received chunk is the one we currently expect.
+		if chunkIndex == state.NextIndex {
+			state.NextIndex++ // Increment if this chunk was the expected next one
+		} else {
+			LogInfo("Chunk processed out of order but token was valid", map[string]interface{}{"file_id": fileID, "received_index": chunkIndex, "expected_index": state.NextIndex})
+			// DO NOT increment state.NextIndex here.
+		}
+		state.LastUpdated = time.Now()
+		LogInfo("Validated chunk and generated next batch of tokens", map[string]interface{}{
+			"file_id":          fileID,
+			"chunk":            chunkIndex,
+			"next_chunk_index": state.NextIndex, // Log the *updated* expected index
+		})
+	}
+
+	h.chunkStatesMu.Unlock() // Unlock after accessing shared state
+	// ------------------------------------
 
 	// Get file chunk from request
 	file, handler, err := r.FormFile("file")
@@ -894,51 +1041,24 @@ func (h *Handler) ChunkUpload(w http.ResponseWriter, r *http.Request) {
 	})
 
 	// Return success response
-	jsonResponse(w, map[string]interface{}{
+	respData := map[string]interface{}{
 		"status":      "success",
 		"file_id":     fileID,
 		"chunk_index": chunkIndex,
-	})
+	}
+	// Add appropriate token(s) to response
+	if chunkIndex == 0 && len(initialTokens) > 0 {
+		respData["initial_chunk_tokens"] = initialTokens
+	} else if len(nextTokens) > 0 { // Check the slice for subsequent chunks
+		respData["next_chunk_tokens"] = nextTokens // Return the array
+	}
+	jsonResponse(w, respData)
 }
 
 // FinalizeUpload combines all chunks and completes the upload
 func (h *Handler) FinalizeUpload(w http.ResponseWriter, r *http.Request) {
-	// For AJAX requests from the same origin, be more lenient with CSRF validation
-	csrfToken := r.FormValue("csrf_token")
-	if csrfToken == "" {
-		csrfToken = r.Header.Get("X-CSRF-Token")
-	}
-
-	// Check if we have a CSRF cookie
-	cookie, err := r.Cookie("csrf_token")
-
-	// For chunked uploads, we'll accept requests that:
-	// 1. Have a valid token+cookie match, OR
-	// 2. Have the X-Requested-With header set to XMLHttpRequest (AJAX request)
-	//    AND Origin header matching our domain (or no Origin header for same-origin requests)
-	isXhr := r.Header.Get("X-Requested-With") == "XMLHttpRequest"
-	origin := r.Header.Get("Origin")
-	sameOrigin := origin == "" || strings.HasPrefix(origin, h.getBaseURL(r))
-
-	if err == nil && csrfToken != "" && h.csrfProtection.ValidateToken(csrfToken, cookie.Value) {
-		// Valid CSRF token and cookie match - this is the normal, secure case
-	} else if isXhr && sameOrigin {
-		// AJAX request from same origin - we'll be more lenient
-		LogInfo("AJAX request from same origin, being lenient with CSRF check", map[string]interface{}{
-			"ip":     r.RemoteAddr,
-			"xhr":    isXhr,
-			"origin": origin,
-		})
-	} else {
-		// Neither case matched - reject the request
-		LogInfo("Invalid CSRF protection for finalize upload", map[string]interface{}{
-			"ip":             r.RemoteAddr,
-			"token_present":  csrfToken != "",
-			"cookie_present": err == nil,
-			"xhr":            isXhr,
-			"origin":         origin,
-		})
-		jsonError(w, "Invalid or missing CSRF token. Please refresh the page and try again.", http.StatusForbidden)
+	// Validate CSRF leniently for finalize uploads
+	if !h.validateChunkCSRF(w, r) {
 		return
 	}
 
@@ -1004,16 +1124,59 @@ func (h *Handler) FinalizeUpload(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Create a buffer for the complete file
-	completeFile := &bytes.Buffer{}
-	completeFile.Grow(int(fileSize)) // Preallocate buffer with the expected file size
+	// --- Validate Final Chunk Token ---
+	h.chunkStatesMu.Lock() // Lock before accessing shared state
 
-	// Read and combine all chunks
+	state, exists := h.chunkStates[fileID]
+	if !exists {
+		h.chunkStatesMu.Unlock()
+		LogInfo("Chunk state not found during finalize", map[string]interface{}{"file_id": fileID})
+		jsonError(w, "Invalid upload state or file ID.", http.StatusBadRequest)
+		return
+	}
+
+	// Get the final token from the header
+	finalChunkToken := r.Header.Get("X-Chunk-Token")
+
+	// Validate token and ensure all chunks were processed (Removed index check)
+	// Recalculate the expected token for the final chunk
+	expectedToken := utils.GenerateHMAC(state.UploadSecret, fmt.Sprintf("chunk%d", totalChunks))
+	if finalChunkToken != expectedToken {
+		h.chunkStatesMu.Unlock()
+		LogInfo("Final chunk token validation failed (Token mismatch)", map[string]interface{}{
+			"file_id":           fileID,
+			"final_token_ok":    false,
+			"expected_index":    totalChunks,
+			"actual_next_index": state.NextIndex, // Log state for info
+		})
+		// Delete invalid state to prevent reuse
+		delete(h.chunkStates, fileID)
+		jsonError(w, fmt.Sprintf("Invalid finalization token (expected %d chunks).", totalChunks), http.StatusForbidden)
+		return
+	}
+
+	// Validation passed, remove the state entry
+	delete(h.chunkStates, fileID)
+	h.chunkStatesMu.Unlock() // Unlock after accessing shared state
+	LogInfo("Final chunk token validated, proceeding with finalize", map[string]interface{}{
+		"file_id": fileID,
+	})
+	// ------------------------------------
+
+	// Prepare to open chunks for streaming
+	var chunkFiles []*os.File
+	var chunkReaders []io.Reader // Restore chunkReaders slice
+
+	// Open all chunk files
 	for i := 0; i < totalChunks; i++ {
 		chunkPath := filepath.Join(chunksDir, fmt.Sprintf("chunk_%d", i))
-		chunkData, err := os.ReadFile(chunkPath)
+		file, err := os.Open(chunkPath)
 		if err != nil {
-			LogError(err, "Error reading chunk", map[string]interface{}{
+			// Clean up already opened files before returning error
+			for _, f := range chunkFiles {
+				_ = f.Close()
+			}
+			LogError(err, "Error opening chunk file for streaming", map[string]interface{}{
 				"file_id":    fileID,
 				"chunk":      i,
 				"chunk_path": chunkPath,
@@ -1021,17 +1184,19 @@ func (h *Handler) FinalizeUpload(w http.ResponseWriter, r *http.Request) {
 			jsonError(w, fmt.Sprintf("Error reading chunk %d", i), http.StatusInternalServerError)
 			return
 		}
-
-		// Append chunk to the complete file
-		if _, err := completeFile.Write(chunkData); err != nil {
-			LogError(err, "Error combining chunks", map[string]interface{}{
-				"file_id": fileID,
-				"chunk":   i,
-			})
-			jsonError(w, "Error combining chunks", http.StatusInternalServerError)
-			return
-		}
+		chunkFiles = append(chunkFiles, file)
+		chunkReaders = append(chunkReaders, file) // Add file (as io.Reader) to chunkReaders
 	}
+
+	// Ensure all opened chunk files are closed eventually
+	defer func() {
+		for _, f := range chunkFiles {
+			_ = f.Close()
+		}
+	}()
+
+	// Create a MultiReader to stream from all chunks sequentially
+	multiReader := io.MultiReader(chunkReaders...) // Pass chunkReaders slice
 
 	// Parse expiry option
 	expiryDuration := models.ParseExpiryDuration(expiryValue)
@@ -1056,20 +1221,20 @@ func (h *Handler) FinalizeUpload(w http.ResponseWriter, r *http.Request) {
 
 	// Create the file metadata
 	fileMetadata := &models.File{
-		ID:              fileID,
-		Filename:        sanitizeFilename(filename),
-		MimeType:        contentType,
-		Size:            fileSize,
-		UploadTime:      time.Now(),
-		ExpiryTime:      expiryTime,
-		Content:         completeFile.Bytes(),
+		ID:         fileID,
+		Filename:   sanitizeFilename(filename),
+		MimeType:   contentType,
+		Size:       fileSize,
+		UploadTime: time.Now(),
+		ExpiryTime: expiryTime,
+		// Content:         completeFile.Bytes(), // Removed: Content is now streamed
 		IsEncrypted:     isEncryptedValue,
 		EncryptedSample: encryptedSample,
 	}
 
-	// Save to storage
-	if err := h.Storage.SaveFile(fileMetadata); err != nil {
-		LogError(err, "Error saving file", map[string]interface{}{
+	// Save to storage using the MultiReader for content
+	if err := h.Storage.SaveFile(fileMetadata, multiReader); err != nil {
+		LogError(err, "Error saving file via streaming", map[string]interface{}{
 			"file_id":   fileMetadata.ID,
 			"file_size": fileMetadata.Size,
 		})
@@ -1084,15 +1249,13 @@ func (h *Handler) FinalizeUpload(w http.ResponseWriter, r *http.Request) {
 		"file_id":   fileMetadata.ID,
 	})
 
-	// Clean up chunks directory
-	go func() {
-		if err := os.RemoveAll(chunksDir); err != nil {
-			LogError(err, "Error cleaning up chunks directory", map[string]interface{}{
-				"file_id":    fileID,
-				"chunks_dir": chunksDir,
-			})
-		}
-	}()
+	// Clean up chunks directory synchronously
+	if err := os.RemoveAll(chunksDir); err != nil {
+		LogError(err, "Error cleaning up chunks directory", map[string]interface{}{
+			"file_id":    fileID,
+			"chunks_dir": chunksDir,
+		})
+	}
 
 	// Return success with redirect URL
 	previewURL := fmt.Sprintf("%s/file/%s", h.getBaseURL(r), fileMetadata.ID)

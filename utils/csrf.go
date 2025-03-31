@@ -1,7 +1,9 @@
 package utils
 
 import (
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"net/http"
 	"strings"
@@ -110,9 +112,9 @@ func (c *CSRFProtection) ValidateToken(formToken string, cookieToken string) boo
 		return false
 	}
 
-	// Valid tokens - remove after use for true one-time use
-	delete(c.tokens, formToken)
-	delete(c.tokens, cookieToken)
+	// Valid tokens - // remove after use for true one-time use
+	// delete(c.tokens, formToken)  // Allow token reuse within expiry
+	// delete(c.tokens, cookieToken) // Allow token reuse within expiry
 	return true
 }
 
@@ -243,4 +245,12 @@ func GenerateRandomString(length int) string {
 		b[i] = charset[int(b[i])%len(charset)]
 	}
 	return string(b)
+}
+
+// GenerateHMAC generates a Base64 encoded HMAC-SHA256 hash
+func GenerateHMAC(secret string, message string) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(message))
+	expectedMAC := mac.Sum(nil)
+	return base64.StdEncoding.EncodeToString(expectedMAC)
 }

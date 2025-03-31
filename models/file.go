@@ -55,7 +55,6 @@ type File struct {
 	Size            int64     `json:"size"`                       // Size of the file in bytes
 	UploadTime      time.Time `json:"upload_time"`                // When the file was uploaded
 	ExpiryTime      time.Time `json:"expiry_time"`                // When the file will expire
-	Content         []byte    `json:"content,omitempty"`          // Compressed file content
 	IsEncrypted     bool      `json:"is_encrypted"`               // Whether the file is encrypted client-side
 	EncryptedSample []byte    `json:"encrypted_sample,omitempty"` // Small encrypted sample for validation
 }
