@@ -314,20 +314,33 @@ const uploadFishPhrases = {
     }
 };
 
-// For backward compatibility with existing code
-function getRandomFishPhrase() {
-    return uploadFishPhrases.getRandomUploadingPhrase();
-}
+// Expose key phrase functions globally for use in other modules
+window.getRandomUploadingPhrase = uploadFishPhrases.getRandomUploadingPhrase.bind(uploadFishPhrases);
+window.getRandomEncryptingPhrase = uploadFishPhrases.getRandomEncryptingPhrase.bind(uploadFishPhrases);
+window.getRandomDownloadingPhrase = uploadFishPhrases.getRandomDownloadingPhrase.bind(uploadFishPhrases);
+window.getRandomDecryptingPhrase = uploadFishPhrases.getRandomDecryptingPhrase.bind(uploadFishPhrases);
 
-function getRandomEncryptionPhrase() {
-    return uploadFishPhrases.getRandomEncryptingPhrase();
-}
+// Assign old names for backward compatibility if needed by other scripts (like upload.js)
+// Point them directly to the correct methods defined above
+window.getRandomFishPhrase = window.getRandomUploadingPhrase; 
+window.getRandomEncryptionPhrase = window.getRandomEncryptingPhrase;
 
-// Export for module environments
+// Commenting out the potentially conflicting function declarations
+// function getRandomFishPhrase() {
+//     return uploadFishPhrases.getRandomUploadingPhrase();
+// }
+// function getRandomEncryptionPhrase() {
+//     return uploadFishPhrases.getRandomEncryptingPhrase();
+// }
+
+// Export for module environments (keep as is, but export all globally assigned functions)
 if (typeof module !== 'undefined') {
     module.exports = { 
         uploadFishPhrases, 
-        getRandomFishPhrase, 
-        getRandomEncryptionPhrase 
+        // Export the globally assigned functions if needed for CommonJS
+        getRandomFishPhrase: window.getRandomFishPhrase, 
+        getRandomEncryptionPhrase: window.getRandomEncryptionPhrase,
+        getRandomDownloadingPhrase: window.getRandomDownloadingPhrase,
+        getRandomDecryptingPhrase: window.getRandomDecryptingPhrase
     };
 } 

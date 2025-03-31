@@ -29,6 +29,9 @@ function initializeUploader() {
     
     // Phrase rotation interval reference
     let phrasesInterval = null;
+    // --- New state variables for initial upload progress ---
+    let isUploadStarting = false;
+    let startingProgressInterval = null;
 
     // Check if encryption is available in this browser
     const isEncryptionSupported = FileEncryption.isEncryptionSupported();
@@ -421,7 +424,7 @@ function initializeUploader() {
 
         if (shouldEncrypt) {
             // Update progress to show encryption state
-            updateProgress(20, getRandomEncryptionPhrase());
+            updateProgress(20, getRandomEncryptionPhrase(), 'encrypting');
 
             // Encrypt the file before upload
             encryptAndUpload(file).catch(error => {
@@ -473,6 +476,13 @@ function initializeUploader() {
         if (formOptions) {
             formOptions.style.display = 'block';
         }
+        
+        // --- Clear the starting progress interval --- 
+        if (startingProgressInterval) {
+            clearInterval(startingProgressInterval);
+            startingProgressInterval = null;
+        }
+        isUploadStarting = false; // Reset flag
     }
 
     // Handle encryption and upload
@@ -482,34 +492,32 @@ function initializeUploader() {
             // Generate a random encryption key
             const encryptionKey = await FileEncryption.generateKey();
 
-            // Start rotating encryption phrases during the encryption process
-            updateProgress(20, getRandomEncryptionPhrase());
+            // --- Start Encryption Phase Display ---
+            // Show indefinite progress bar and start rotating encryption phrases.
+            // The updateProgress function now handles the interval internally.
+            updateProgress(null, getRandomEncryptionPhrase(), 'encrypting');
             
-            // Set up rotation interval for encryption phrases
-            phrasesInterval = setInterval(function() {
-                updateProgress(null, getRandomEncryptionPhrase());
-            }, 5000);
+            // Allow UI to update before heavy work
+            await new Promise(resolve => setTimeout(resolve, 50)); 
             
-            // First, create a 4KB sample from the original file
+            // First, create a 4KB sample from the original file for validation (quick operation)
             const originalSample = file.slice(0, 4096);
-            
-            // Update progress for sample encryption
-            updateProgress(30, "Creating validation sample...");
+            // Optional: Update text briefly, but keep the 'encrypting' phase active
+            // updateProgress(null, "Creating validation sample...", 'encrypting'); 
             
             try {
-                // Encrypt the sample separately for validation
+                // Encrypt the sample separately (also relatively quick)
                 const encryptedSample = await FileEncryption.encryptFile(originalSample, encryptionKey);
                 const sampleArrayBuffer = await encryptedSample.arrayBuffer();
-                
-                // Convert sample to base64 for storage
                 const sampleBase64 = FileEncryption.arrayBufferToBase64(sampleArrayBuffer);
                 
-                // Update progress for main file encryption
-                updateProgress(40, "Sample created! Encrypting main file...");
+                // Optional: Update text briefly
+                // updateProgress(null, "Sample created! Encrypting main file...", 'encrypting');
 
-                // Encrypt the main file
+                // --- Encrypt the MAIN file (This is the long part) ---
                 const encryptedBlob = await FileEncryption.encryptFile(file, encryptionKey);
 
+                // --- Prepare for Upload Phase ---
                 // Add the encrypted sample to a hidden form field
                 sampleInput = document.createElement('input');
                 sampleInput.type = 'hidden';
@@ -523,37 +531,45 @@ function initializeUploader() {
                     lastModified: file.lastModified
                 });
 
-                // Always use chunked upload for encrypted files
-                updateProgress(70, "File encryption complete! Starting chunked upload...");
+                // --- Transition to Upload Phase Display ---
+                // Set progress bar to a starting percentage for upload and switch phrase rotation.
+                updateProgress(0, "Encryption complete! Starting upload...", 'uploading'); // Start upload progress at 0%
                 
-                // Add the encrypted sample to the chunked upload
+                // Allow UI to update before starting upload
+                await new Promise(resolve => setTimeout(resolve, 50)); 
+                
+                // Start the actual chunked upload process
                 await sendChunkedUpload(encryptedFile, encryptionKey, sampleBase64);
                 
             } catch (encryptionError) {
                 console.error('Encryption operation failed:', encryptionError);
-                throw new Error('Failed to encrypt file: ' + encryptionError.message);
+                // Display error using the progress UI
+                updateProgress(null, 'Encryption failed: ' + encryptionError.message, 'error');
+                // Reset UI after error display
+                setTimeout(resetUploadUI, 5000);
             }
         } catch (error) {
-            console.error('Encryption process failed:', error);
-            showError('Encryption failed: ' + error.message);
-            
-            // Clean up if encryption fails
-            if (sampleInput && sampleInput.parentNode) {
-                sampleInput.parentNode.removeChild(sampleInput);
-            }
+            console.error('Encryption setup failed:', error);
+             // Display error using the progress UI
+             updateProgress(null, 'Encryption setup failed: ' + error.message, 'error');
+             // Reset UI after error display
+             setTimeout(resetUploadUI, 5000); 
         } finally {
-            // Always clear the encryption phrases interval
-            if (phrasesInterval) {
-                clearInterval(phrasesInterval);
-                phrasesInterval = null;
-            }
+            // Cleanup: sampleInput removal (if needed on failure) should be handled within catch blocks
+            // Interval clearing is now handled by updateProgress
         }
     }
 
     // Process regular, unencrypted upload
     function processRegularUpload(file) {
-        // Always use chunked upload for better progress reporting
-        sendChunkedUpload(file);
+        // Show initial progress feedback immediately
+        updateProgress(0, "Preparing upload...", 'uploading');
+        
+        // Use chunked upload for better progress reporting
+        // Add a slight delay to allow UI to update before starting
+        setTimeout(() => {
+           sendChunkedUpload(file);
+        }, 50); 
     }
 
     // Constants for chunked upload
@@ -955,119 +971,156 @@ function initializeUploader() {
     }
 
     // Update progress bar
-    function updateProgress(percent, text) {
+    function updateProgress(percent, text, phase) {
         // Hide any error message when showing progress
         const errorContainer = document.getElementById('errorContainer');
         if (errorContainer) {
             errorContainer.style.display = 'none';
         }
 
-        // Determine the current phase based on the text
+        // Determine the current phase based on the text or existing state
         let currentPhase = null;
-        if (text && text.includes('Encrypting')) {
+        if (document.body.classList.contains('encrypting-active')) {
             currentPhase = 'encrypting';
-        } else if (text && (text.includes('Upload') || text.includes('Catching') || text.includes('%'))) {
+        } else if (document.body.classList.contains('uploading-active')) {
             currentPhase = 'uploading';
         }
 
-        // Remove all phase classes and add the current one
-        document.body.classList.remove('encrypting-active', 'uploading-active');
-        if (currentPhase) {
-            document.body.classList.add(currentPhase + '-active');
+        // Explicitly set phase based on text if provided
+        if (text) {
+           if (text.includes('Encrypting') || text.includes('Sample') || text.includes('validation') || text.includes('Securing') || text.includes('invisible') || text.includes('Generating')) {
+               currentPhase = 'encrypting';
+           } else if (text.includes('Upload') || text.includes('Catching') || text.includes('%') || text.includes('Finalizing') || text.includes('fish')) {
+               currentPhase = 'uploading';
+           }
         }
-
-        // Update fish logo animation based on phase
-        const fishLogo = document.querySelector('.drop-zone-logo');
-        if (fishLogo) {
-            fishLogo.classList.remove('encrypting', 'uploading');
-            if (currentPhase) {
-                fishLogo.classList.add(currentPhase);
-            }
-        }
-
-        // Handle indefinite progress bar for encryption
-        if (currentPhase === 'encrypting') {
-            // Use indefinite progress bar
-            elements.progressBar.classList.add('indefinite');
-        } else {
-            // Use percentage-based progress bar
-            elements.progressBar.classList.remove('indefinite');
-            
-            // Apply transition for smoother animation
-            elements.progressBar.style.transition = 'width 0.3s ease-in-out';
-            
-            // Update progress bar width if percent is provided
-            if (percent !== null) {
-                elements.progressBar.style.width = percent + '%';
-            }
-        }
-
-        // Clear any existing phrase rotation interval if we're setting new text
-        // but not during encryption rotation
-        if (text && phrasesInterval) {
+        
+        // Clear any existing phrase rotation interval FIRST
+        if (phrasesInterval) {
             clearInterval(phrasesInterval);
             phrasesInterval = null;
         }
+        // --- Clear the starting progress interval on phase change ---
+        if (phase !== 'uploading' && startingProgressInterval) {
+            clearInterval(startingProgressInterval);
+            startingProgressInterval = null;
+            isUploadStarting = false;
+        }
 
-        // Update text with custom message or percentage
-        if (text) {
-            elements.progressText.textContent = text;
-            
-            // Start phrase rotation for encryption phase
-            if (currentPhase === 'encrypting' && !phrasesInterval) {
-                phrasesInterval = setInterval(function() {
-                    // Get a random phrase from the appropriate category
-                    const newPhrase = getRandomEncryptionPhrase();
-                    elements.progressText.textContent = newPhrase;
-                }, 5000);
-            } else if (currentPhase === 'uploading' && percent !== null && !phrasesInterval) {
-                // For uploading phase with percentage
-                phrasesInterval = setInterval(function() {
-                    const currentPercent = parseInt(elements.progressBar.style.width) || percent;
-                    const newPhrase = getRandomFishPhrase();
-                    elements.progressText.textContent = currentPercent + "% - " + newPhrase;
-                }, 5000);
-            }
-        } else {
-            // For regular progress, show fish phrases throughout
-            if (percent < 100) {
-                // Get phrase from the appropriate category based on phase
-                let randomPhrase;
-                if (currentPhase === 'encrypting') {
-                    randomPhrase = getRandomEncryptionPhrase();
-                    elements.progressText.textContent = randomPhrase;
-                } else {
-                    randomPhrase = getRandomFishPhrase();
-                    elements.progressText.textContent = percent + "% - " + randomPhrase;
-                }
-                
-                if (!phrasesInterval) {
-                    // Start rotating phrases every 5 seconds
-                    phrasesInterval = setInterval(function() {
-                        if (currentPhase === 'encrypting') {
-                            const newPhrase = getRandomEncryptionPhrase();
-                            elements.progressText.textContent = newPhrase;
-                        } else {
-                            const currentPercent = parseInt(elements.progressBar.style.width) || percent;
-                            const newPhrase = getRandomFishPhrase();
-                            elements.progressText.textContent = currentPercent + "% - " + newPhrase;
-                        }
-                    }, 5000);
-                }
-            } else {
-                elements.progressText.textContent = percent + '% - Complete!';
-                
-                // Stop phrase rotation at 100%
-                if (phrasesInterval) {
-                    clearInterval(phrasesInterval);
-                    phrasesInterval = null;
-                }
+        // Update body classes and fish logo animation based on determined phase
+        document.body.classList.remove('encrypting-active', 'uploading-active');
+        const fishLogo = document.querySelector('.drop-zone-logo'); // Ensure we target the correct logo instance
+        if (fishLogo) {
+           fishLogo.classList.remove('encrypting', 'uploading');
+        }
+        
+        if (currentPhase) {
+            document.body.classList.add(currentPhase + '-active');
+            if (fishLogo) {
+               fishLogo.classList.add(currentPhase);
             }
         }
 
-        // Update color based on state
-        if (percent === 100) {
-            elements.progressBar.style.backgroundColor = '#27ae60'; // Darker green for completion
+        // Handle progress bar style (indefinite for encryption, percentage otherwise)
+        if (currentPhase === 'encrypting') {
+            elements.progressBar.classList.add('indefinite');
+            elements.progressBar.style.width = '100%'; // Ensure indefinite bar spans full width
+            elements.progressBar.style.transition = 'none'; // No transition for indefinite
+        } else {
+            elements.progressBar.classList.remove('indefinite');
+            elements.progressBar.style.transition = 'width 0.3s ease-in-out';
+            // Update progress bar width only if percent is provided and valid
+            if (percent !== null && percent >= 0 && percent <= 100) {
+                // --- Handle transition from starting crawl to real progress ---
+                if (phase === 'uploading' && percent > 0 && isUploadStarting) {
+                    if (startingProgressInterval) {
+                        clearInterval(startingProgressInterval);
+                        startingProgressInterval = null;
+                    }
+                    isUploadStarting = false;
+                    // Ensure smooth transition by potentially using a slightly faster animation here
+                    elements.progressBar.style.transition = 'width 0.1s ease-out'; 
+                }
+                elements.progressBar.style.width = percent + '%';
+            } else if (phase === 'uploading' && (percent === 0 || percent === null)) {
+                 // --- Handle the VERY start of the upload phase ---
+                 if (!isUploadStarting) { // Only trigger this once at the start
+                     isUploadStarting = true;
+                     elements.progressBar.style.transition = 'none'; // No transition for initial jump
+                     elements.progressBar.style.width = '1%'; // Initial small bump
+                     
+                     // Clear any old interval just in case
+                     if (startingProgressInterval) clearInterval(startingProgressInterval);
+                     
+                     // Start the slow crawl
+                     startingProgressInterval = setInterval(() => {
+                         // Check flag again in case real progress arrived fast
+                         if (!isUploadStarting) {
+                              clearInterval(startingProgressInterval);
+                              startingProgressInterval = null;
+                              return;
+                         }
+                         let currentWidth = parseFloat(elements.progressBar.style.width) || 0;
+                         if (currentWidth < 5) { // Cap at 5%
+                             elements.progressBar.style.transition = 'width 0.1s linear'; // Smooth crawl
+                             elements.progressBar.style.width = (currentWidth + 0.2) + '%'; 
+                         } else { // Stop crawling if we reach the cap
+                             clearInterval(startingProgressInterval);
+                             startingProgressInterval = null;
+                         }
+                     }, 100); // Adjust interval time as needed
+                 }
+            }
+        }
+
+        // Set initial text content
+        if (text) {
+            elements.progressText.textContent = text;
+        } else if (percent !== null) {
+            // Default text if only percentage is provided
+            elements.progressText.textContent = percent + '%';
+        }
+
+        // Start new phrase rotation interval based on the current phase (and not already complete)
+        if (percent !== null && percent < 100) {
+            if (currentPhase === 'encrypting') {
+                // Immediately set an encryption phrase if text wasn't provided
+                if (!text) elements.progressText.textContent = getRandomEncryptionPhrase();
+                
+                phrasesInterval = setInterval(() => {
+                    elements.progressText.textContent = getRandomEncryptionPhrase();
+                }, 5000);
+            } else if (currentPhase === 'uploading') {
+                // Immediately set an upload phrase if text wasn't provided
+                const currentPercent = parseInt(elements.progressBar.style.width) || percent || 0;
+                if (!text) elements.progressText.textContent = currentPercent + "% - " + getRandomFishPhrase();
+                
+                phrasesInterval = setInterval(() => {
+                    // Re-read percent from style in case it updated without a text change
+                    const updatedPercent = parseInt(elements.progressBar.style.width) || 0;
+                    elements.progressText.textContent = updatedPercent + "% - " + getRandomFishPhrase();
+                }, 5000);
+            }
+        } else if (percent === 100) {
+             // Ensure completion text is set if not provided explicitly
+             if (!text || !text.toLowerCase().includes('complete')) {
+                 elements.progressText.textContent = '100% - Complete!';
+             }
+             elements.progressBar.style.backgroundColor = '#27ae60'; // Darker green for completion
+        } else {
+            // Handle cases where percent might be null but phase is set (e.g., initial call)
+             if (currentPhase === 'encrypting' && !text) {
+                 elements.progressText.textContent = getRandomEncryptionPhrase();
+                 phrasesInterval = setInterval(() => {
+                     elements.progressText.textContent = getRandomEncryptionPhrase();
+                 }, 5000);
+             } else if (currentPhase === 'uploading' && !text) {
+                 elements.progressText.textContent = "0% - " + getRandomFishPhrase();
+                 phrasesInterval = setInterval(() => {
+                    const updatedPercent = parseInt(elements.progressBar.style.width) || 0;
+                    elements.progressText.textContent = updatedPercent + "% - " + getRandomFishPhrase();
+                 }, 5000);
+             }
         }
     }
 

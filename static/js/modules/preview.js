@@ -100,14 +100,7 @@ function handleEncryptedPreview() {
 async function validateEncryptionSample(key, fileURL, mimeType, filename) {
     try {
         // Show progress indicator
-        const progressContainer = DOM.byId('decryptionProgress');
-        if (progressContainer) {
-            progressContainer.style.display = 'block';
-            const progressText = DOM.byId('decryptionProgressText');
-            if (progressText) {
-                progressText.textContent = 'Validating encryption key...';
-            }
-        }
+        updateDownloadProgress(null, 'Validating encryption key...', 'validating');
 
         // Step 1: Basic format validation of the key
         if (!key) {
@@ -142,7 +135,8 @@ async function validateEncryptionSample(key, fileURL, mimeType, filename) {
         
         // If no sample file exists, it's an older file without sample validation
         if (!sampleResponse.ok) {
-            hideDecryptionProgress();
+            // Hide progress
+            updateDownloadProgress(null, null, null);
             return true;
         }
         
@@ -154,27 +148,20 @@ async function validateEncryptionSample(key, fileURL, mimeType, filename) {
             // Check if the sample is valid for decryption (needs at least IV + some content)
             if (sampleData.byteLength < 13) {
                 console.warn('Sample is too small for validation:', sampleData.byteLength, 'bytes');
-                hideDecryptionProgress();
+                // Hide progress
+                updateDownloadProgress(null, null, null);
                 return true; // Assume valid for backward compatibility
             }
             
             // Update progress text
-            const progressText = DOM.byId('decryptionProgressText');
-            if (progressText) {
-                progressText.textContent = 'Decrypting validation sample...';
-            }
+            updateDownloadProgress(null, 'Decrypting validation sample...', 'validating');
             
             // Try to decrypt the sample with the provided key
             try {
                 await FileEncryption.decryptFile(sampleData, key, mimeType);
                 
-                // Update progress text
-                if (progressText) {
-                    progressText.textContent = 'Key validation successful!';
-                }
-                
                 // Hide progress after a short delay
-                setTimeout(hideDecryptionProgress, 1000);
+                setTimeout(() => updateDownloadProgress(null, null, null), 1000);
                 return true;
             } catch (decryptError) {
                 console.error('Validation failed: Cannot decrypt sample with provided key:', decryptError);
@@ -269,20 +256,6 @@ function hideDecryptionProgress() {
     }
 }
 
-// Show decryption progress 
-function showDecryptionProgress(message) {
-    const progressContainer = DOM.byId('decryptionProgress');
-    const progressText = DOM.byId('decryptionProgressText');
-    
-    if (progressContainer && progressText) {
-        if (message) {
-            progressText.textContent = message;
-        }
-        progressContainer.style.display = 'block';
-        progressContainer.classList.add('displayed');
-    }
-}
-
 // Reset UI after download is complete
 function resetDownloadUI() {
     const downloadSection = DOM.byId('fileActions');
@@ -312,91 +285,110 @@ function resetDownloadUI() {
 
 // Handle direct download of encrypted file
 async function handleEncryptedDownload(key, fileURL, mimeType, filename) {
+    const controller = new AbortController();
+    const signal = controller.signal;
+    let lastProgressUpdate = 0;
+
     try {
-        // Show progress UI
-        showProgressUI('Initializing download...');
+        updateDownloadProgress(0, 'Initializing download...', 'downloading');
         
-        // Create abort controller for fetch
-        const controller = new AbortController();
-        const signal = controller.signal;
+        // Allow UI to update
+        await new Promise(resolve => setTimeout(resolve, 50)); 
+
+        // Step 1: Download the encrypted file using fetch streams
+        const response = await fetch(fileURL, {
+            method: 'GET',
+            credentials: 'omit',
+            mode: 'cors',
+            signal: signal
+        });
+
+        if (!response.ok) {
+            throw new Error(`Download failed: Server returned ${response.status}`);
+        }
+
+        const reader = response.body.getReader();
+        const contentLength = +response.headers.get('Content-Length'); // Get file size
+        let receivedLength = 0;
+        let chunks = [];
         
-        try {
-            // Step 1: Download the encrypted file
-            showProgressUI('Downloading encrypted file...', 10);
+        // Show initial progress
+        updateDownloadProgress(0, null, 'downloading');
+
+        while (true) {
+            const { done, value } = await reader.read();
             
-            const response = await fetch(fileURL, {
-                method: 'GET',
-                credentials: 'omit',
-                mode: 'cors',
-                signal: signal
-            });
-            
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
+            if (done) {
+                break;
             }
             
-            // Get file as ArrayBuffer for decryption
-            const encryptedData = await response.arrayBuffer();
+            chunks.push(value);
+            receivedLength += value.length;
             
-            // Show 40% progress after download completes
-            showProgressUI('Preparing to decrypt file...', 40);
-            
-            // Allow UI to update before heavy decryption begins
-            await new Promise(resolve => setTimeout(resolve, 100));
-            
-            // Step 2: Decrypt the file
-            showProgressUI('Decrypting file...', 60);
-            
-            // Decrypt the file using the encryption key from the URL hash
-            const decryptedFile = await FileEncryption.decryptFile(encryptedData, key, mimeType);
-            
-            // Step 3: Prepare for download
-            showProgressUI('Preparing download...', 80);
-            
-            // Create a blob from the decrypted file
-            const blob = new Blob([decryptedFile], { type: mimeType });
-            
-            // Step 4: Download the decrypted file
-            const downloadUrl = URL.createObjectURL(blob);
-            
-            // Create a temporary link to trigger the download
-            const downloadLink = document.createElement('a');
-            downloadLink.href = downloadUrl;
-            downloadLink.download = filename || 'download';
-            
-            // Trigger download
-            showProgressUI('Starting download...', 90);
-            document.body.appendChild(downloadLink);
-            downloadLink.click();
-            document.body.removeChild(downloadLink);
-            
-            // Clean up the URL object after a delay
-            setTimeout(() => URL.revokeObjectURL(downloadUrl), 100);
-            
-            // Complete progress
-            showProgressUI('Download complete!', 100);
-            
-            // Reset UI after a delay
-            setTimeout(resetDownloadUI, 2000);
-            
-        } catch (error) {
-            // Error handling
-            console.error('Download error:', error);
-            
-            showProgressUI('Error: ' + error.message);
-            
-            // Abort the fetch if it's still in progress
-            controller.abort();
-            
-            // Reset UI after error display
-            setTimeout(resetDownloadUI, 5000);
+            const now = Date.now();
+            // Update progress bar, but throttle updates to avoid killing the browser
+            if (contentLength && now - lastProgressUpdate > 100) { // Update every 100ms
+                const percent = Math.round((receivedLength / contentLength) * 100);
+                updateDownloadProgress(percent, null, 'downloading');
+                lastProgressUpdate = now;
+            } else if (!contentLength && now - lastProgressUpdate > 500) { // Update less often if size unknown
+                 // Show bytes downloaded if size is unknown
+                 updateDownloadProgress(null, `Downloaded ${formatSize(receivedLength)}...`, 'downloading');
+                 lastProgressUpdate = now;
+            }
         }
         
-    } catch (error) {
-        console.error('Unexpected error in download process:', error);
-        showProgressUI('Unexpected error: ' + error.message);
+        // Ensure final download percentage is shown
+         if (contentLength) {
+             updateDownloadProgress(100, null, 'downloading');
+         } else {
+             updateDownloadProgress(null, `Downloaded ${formatSize(receivedLength)}`, 'downloading');
+         }
         
-        // Reset UI after error display
+        // Combine chunks into a single blob/buffer
+        const encryptedBlob = new Blob(chunks, { type: mimeType });
+        const encryptedData = await encryptedBlob.arrayBuffer();
+        chunks = []; // Clear chunks array to free memory
+
+        // Step 2: Decrypt the file
+        updateDownloadProgress(null, 'Download complete. Decrypting file...', 'decrypting');
+        
+        // Allow UI to update before heavy decryption begins
+        await new Promise(resolve => setTimeout(resolve, 100));
+
+        const decryptedFile = await FileEncryption.decryptFile(encryptedData, key, mimeType);
+        
+        // Step 3: Prepare and trigger download
+        updateDownloadProgress(null, 'Decryption complete. Preparing download...', 'decrypting'); // Keep decrypting phase briefly
+        
+        const decryptedBlob = new Blob([decryptedFile], { type: mimeType });
+        const downloadUrl = URL.createObjectURL(decryptedBlob);
+        
+        const downloadLink = document.createElement('a');
+        downloadLink.href = downloadUrl;
+        downloadLink.download = filename || 'download'; // Use original filename
+        
+        document.body.appendChild(downloadLink);
+        downloadLink.click();
+        document.body.removeChild(downloadLink);
+        
+        // Clean up the URL object after a short delay
+        setTimeout(() => URL.revokeObjectURL(downloadUrl), 500);
+
+        // Step 4: Show completion
+        updateDownloadProgress(100, 'Download complete!', 'complete');
+
+        // Reset UI after a longer delay to show completion message
+        setTimeout(resetDownloadUI, 3000);
+
+    } catch (error) {
+        console.error('Download/Decryption error:', error);
+        // Abort fetch if active
+        if (!controller.signal.aborted) {
+             controller.abort();
+        }
+        updateDownloadProgress(null, `Error: ${error.message}`, 'error');
+        // Reset UI after showing error
         setTimeout(resetDownloadUI, 5000);
     }
 }
@@ -409,94 +401,102 @@ function formatSize(bytes) {
     else return (bytes / 1073741824).toFixed(1) + ' GB';
 }
 
-// Update progress UI with message and percentage
-function showProgressUI(message, percent = null) {
-    const downloadSection = DOM.byId('fileActions');
+// NEW Centralized function to update progress UI (replaces showProgressUI and show/hideDecryptionProgress)
+function updateDownloadProgress(percent = null, message = null, phase = null) {
     const progressContainer = DOM.byId('downloadProgress');
     const progressBar = DOM.byId('downloadProgressBar');
     const progressText = DOM.byId('downloadProgressText');
+    const downloadSection = DOM.byId('fileActions'); // Needed to hide download button
+    const fishLogo = document.querySelector('.preview-logo'); // Assuming logo exists
     
-    if (!progressContainer || !progressBar || !progressText) return;
-    
-    // Show progress UI
-    if (downloadSection) downloadSection.style.display = 'none';
-    progressContainer.style.display = 'block';
-    progressContainer.classList.add('displayed'); // Add displayed class for better spacing
-    
-    // Determine the current phase based on the message
-    let currentPhase = null;
-    if (message && message.includes('Decrypt')) {
-        currentPhase = 'decrypting';
-    } else if (message && message.includes('Download')) {
-        currentPhase = 'downloading';
+    if (!progressContainer || !progressBar || !progressText) {
+        console.error("Progress UI elements not found!");
+        return;
     }
-    
-    // Remove all phase classes and add the current one
-    document.body.classList.remove('downloading-active', 'decrypting-active');
-    if (currentPhase) {
-        document.body.classList.add(currentPhase + '-active');
+
+    // Clear any existing phrase interval first
+    if (window.previewPhraseInterval) {
+        clearInterval(window.previewPhraseInterval);
+        window.previewPhraseInterval = null;
     }
-    
-    // Update fish logo animation based on phase
-    const fishLogo = document.querySelector('.preview-logo');
+
+    // --- Phase Management ---
+    document.body.classList.remove('validating-active', 'downloading-active', 'decrypting-active', 'complete-active', 'error-active');
     if (fishLogo) {
-        fishLogo.classList.remove('downloading', 'decrypting');
-        if (currentPhase) {
-            fishLogo.classList.add(currentPhase);
-        }
+       fishLogo.classList.remove('validating', 'downloading', 'decrypting', 'complete', 'error');
     }
-    
-    // Handle indefinite progress bar for decryption
-    if (currentPhase === 'decrypting') {
-        // Use indefinite progress bar
-        progressBar.classList.add('indefinite');
-        
-        // Set progress text from uploadFishPhrases
-        progressText.textContent = uploadFishPhrases.getRandomDecryptingPhrase();
-        
-        // Start phrase rotation for decryption
-        if (!window.previewPhraseInterval) {
-            window.previewPhraseInterval = setInterval(function() {
-                progressText.textContent = uploadFishPhrases.getRandomDecryptingPhrase();
-            }, 5000);
+
+    if (phase) {
+        document.body.classList.add(phase + '-active');
+        if (fishLogo) {
+           fishLogo.classList.add(phase);
         }
-    } else {
-        // Use percentage-based progress bar
-        progressBar.classList.remove('indefinite');
         
-        // Update progress bar with percent
-        if (percent !== null) {
-            progressBar.style.width = percent + '%';
-            
-            // Get phrase from the appropriate category based on phase
-            if (currentPhase === 'downloading') {
-                // Set progress text with percentage and downloading phrase
-                progressText.textContent = percent + '% - ' + uploadFishPhrases.getRandomDownloadingPhrase();
-                
-                // Start phrase rotation for downloading
-                if (!window.previewPhraseInterval) {
-                    window.previewPhraseInterval = setInterval(function() {
-                        const currentPercent = parseInt(progressBar.style.width) || percent;
-                        progressText.textContent = currentPercent + '% - ' + uploadFishPhrases.getRandomDownloadingPhrase();
-                    }, 5000);
-                }
-            } else {
-                // Default progress text
-                progressText.textContent = message;
-            }
+        // Show progress container and hide download button
+        progressContainer.style.display = 'block';
+        progressContainer.classList.add('displayed');
+        if(downloadSection) downloadSection.style.display = 'none';
+        
+        // --- Progress Bar Style ---
+        progressBar.classList.remove('indefinite'); // Reset indefinite state
+        progressBar.style.transition = 'width 0.2s ease-in-out'; // Default transition
+        progressBar.style.backgroundColor = ''; // Reset color
+
+        if (phase === 'validating' || phase === 'decrypting') {
+            progressBar.classList.add('indefinite');
+            progressBar.style.width = '100%';
+            progressBar.style.transition = 'none';
+        } else if (phase === 'downloading' && percent !== null) {
+            progressBar.style.width = Math.max(0, Math.min(100, percent)) + '%';
+        } else if (phase === 'complete') {
+            progressBar.style.width = '100%';
+            progressBar.style.backgroundColor = '#27ae60'; // Green for complete
+        } else if (phase === 'error') {
+            progressBar.style.width = '100%';
+            progressBar.style.backgroundColor = '#e74c3c'; // Red for error
         } else {
-            // Default progress text
-            progressText.textContent = message;
+            // Default/fallback state (e.g., initializing)
+            progressBar.style.width = (percent !== null ? percent : 0) + '%';
         }
-    }
-    
-    // Clear the phrase interval if we're done
-    if (percent === 100) {
-        progressText.textContent = '100% - Complete!';
-        if (window.previewPhraseInterval) {
-            clearInterval(window.previewPhraseInterval);
-            window.previewPhraseInterval = null;
+        
+        // --- Progress Text & Phrases ---
+        let textContent = message; // Use provided message by default
+        
+        // Start interval only for ongoing phases
+        if (phase === 'downloading' || phase === 'decrypting' || phase === 'validating') {
+             // Set initial text if message is null
+             if (!textContent) {
+                 if (phase === 'downloading') {
+                     textContent = (percent !== null ? percent : 0) + '% - ' + getRandomDownloadingPhrase();
+                 } else if (phase === 'decrypting') {
+                     textContent = getRandomDecryptingPhrase();
+                 } else { // validating
+                     textContent = "Validating..."; // Default validation text
+                 }
+             }
+             
+             // Start interval
+             window.previewPhraseInterval = setInterval(() => {
+                if (phase === 'downloading') {
+                    const currentPercent = parseInt(progressBar.style.width) || 0;
+                    progressText.textContent = currentPercent + '% - ' + getRandomDownloadingPhrase();
+                } else if (phase === 'decrypting') {
+                     progressText.textContent = getRandomDecryptingPhrase();
+                } else { // validating - typically short, maybe no interval needed?
+                     // Optionally rotate validating phrases if we add them
+                     // progressText.textContent = getRandomValidatingPhrase(); 
+                }
+             }, 5000); // Rotate every 5 seconds
         }
+        
+        // Set the final text content
+        progressText.textContent = textContent;
+
+    } else {
+        // Phase is null: Hide the progress container, show download button
+        progressContainer.style.display = 'none';
+        progressContainer.classList.remove('displayed');
+        if(downloadSection) downloadSection.style.display = 'flex';
     }
 }
 
