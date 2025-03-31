@@ -52,15 +52,6 @@ document.addEventListener('DOMContentLoaded', function () {
                 console.error('Preview module not loaded correctly');
             }
         }
-        
-        // Check for encryption support
-        if (typeof FileEncryption !== 'undefined') {
-            const isSupported = FileEncryption.isEncryptionSupported();
-            
-            if (!isSupported && typeof showEncryptionWarning === 'function') {
-                safeCall(showEncryptionWarning);
-            }
-        }
     } catch (error) {
         console.error('Error during application initialization:', error);
     }

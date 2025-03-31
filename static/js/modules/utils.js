@@ -15,24 +15,6 @@ function formatFileSize(bytes) {
 }
 
 /**
- * Show encryption not supported warning
- */
-function showEncryptionWarning() {
-    const encryptionCheckbox = document.getElementById('encryptionEnabled');
-    if (encryptionCheckbox) {
-        encryptionCheckbox.checked = false;
-        encryptionCheckbox.disabled = true;
-
-        const warning = document.createElement('div');
-        warning.className = 'encryption-warning';
-        warning.innerHTML = '<p>Your browser does not support secure encryption. Files will be uploaded unencrypted.</p>';
-
-        const parent = encryptionCheckbox.closest('.form-group');
-        parent.appendChild(warning);
-    }
-}
-
-/**
  * Copy text to clipboard with fallback for older browsers
  * @param {string} text - Text to copy
  * @returns {Promise<boolean>} - Promise resolving to success state
@@ -84,37 +66,11 @@ function fallbackCopyToClipboard(text) {
     }
 }
 
-/**
- * Update preview with content
- * @param {string} objectURL - Object URL of the content
- * @param {string} mimeType - MIME type of the content
- */
-function updatePreview(objectURL, mimeType) {
-    if (mimeType.startsWith('image/')) {
-        const img = document.getElementById('previewImage');
-        if (img) img.src = objectURL;
-    } else if (mimeType.startsWith('video/')) {
-        const source = document.getElementById('previewVideoSource');
-        if (source) {
-            source.src = objectURL;
-            document.getElementById('previewVideo').load();
-        }
-    } else if (mimeType.startsWith('audio/')) {
-        const source = document.getElementById('previewAudioSource');
-        if (source) {
-            source.src = objectURL;
-            document.getElementById('previewAudio').load();
-        }
-    }
-}
-
-// Export functions
+// Export necessary utility functions
 if (typeof module !== 'undefined') {
     module.exports = {
         formatFileSize,
-        showEncryptionWarning,
         copyToClipboard,
-        fallbackCopyToClipboard,
-        updatePreview
+        fallbackCopyToClipboard
     };
 } 

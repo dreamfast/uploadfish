@@ -12,13 +12,24 @@ function initializePreviewPage() {
     const copyButton = document.getElementById('copyLinkBtn');
     if (copyButton) {
         copyButton.addEventListener('click', function () {
-            copyLinkToClipboard();
+            // Use the generic copyToClipboard from utils.js
+            copyToClipboard(window.location.href)
+                .then(success => {
+                    updateCopyButton(success ? 'Copied!' : 'Copy failed!');
+                })
+                .catch(err => { // Should not happen with current implementation, but good practice
+                    console.error('Copying failed unexpectedly:', err);
+                    updateCopyButton('Copy failed!');
+                });
         });
     }
 
     // Handle encrypted file display and decryption
     handleEncryptedPreview();
 }
+
+// Module-scoped variable for phrase interval
+let previewPhrasesInterval = null;
 
 // Handle encrypted file preview functionality
 function handleEncryptedPreview() {
@@ -256,30 +267,35 @@ function hideDecryptionProgress() {
     }
 }
 
-// Reset UI after download is complete
+// Reset download UI elements to their default state
+// (Hides progress, shows download button, clears interval)
 function resetDownloadUI() {
-    const downloadSection = DOM.byId('fileActions');
     const progressContainer = DOM.byId('downloadProgress');
-    
-    if (downloadSection) downloadSection.style.display = 'flex';
+    const downloadSection = DOM.byId('fileActions');
+
+    // Hide progress
     if (progressContainer) {
         progressContainer.style.display = 'none';
         progressContainer.classList.remove('displayed');
     }
-    
-    // Remove all phase classes
-    document.body.classList.remove('downloading-active', 'decrypting-active');
-    
-    // Reset fish logo animation
+
+    // Show download button (only if file wasn't invalid due to key)
+    const encryptionError = DOM.byId('encryptionError');
+    if (downloadSection && (!encryptionError || encryptionError.style.display === 'none')) {
+        downloadSection.style.display = 'flex';
+    }
+
+    // Clear interval
+    if (previewPhrasesInterval) {
+        clearInterval(previewPhrasesInterval);
+        previewPhrasesInterval = null;
+    }
+
+    // Reset body/logo classes (optional but good practice)
+    document.body.classList.remove('validating-active', 'downloading-active', 'decrypting-active', 'complete-active', 'error-active');
     const fishLogo = document.querySelector('.preview-logo');
     if (fishLogo) {
-        fishLogo.classList.remove('downloading', 'decrypting');
-    }
-    
-    // Clear any phrase rotation intervals
-    if (window.previewPhraseInterval) {
-        clearInterval(window.previewPhraseInterval);
-        window.previewPhraseInterval = null;
+        fishLogo.classList.remove('validating', 'downloading', 'decrypting', 'complete', 'error');
     }
 }
 
@@ -393,14 +409,6 @@ async function handleEncryptedDownload(key, fileURL, mimeType, filename) {
     }
 }
 
-// Format file size for display
-function formatSize(bytes) {
-    if (bytes < 1024) return bytes + ' bytes';
-    else if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
-    else if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + ' MB';
-    else return (bytes / 1073741824).toFixed(1) + ' GB';
-}
-
 // NEW Centralized function to update progress UI (replaces showProgressUI and show/hideDecryptionProgress)
 function updateDownloadProgress(percent = null, message = null, phase = null) {
     const progressContainer = DOM.byId('downloadProgress');
@@ -415,13 +423,32 @@ function updateDownloadProgress(percent = null, message = null, phase = null) {
     }
 
     // Clear any existing phrase interval first
-    if (window.previewPhraseInterval) {
-        clearInterval(window.previewPhraseInterval);
-        window.previewPhraseInterval = null;
+    if (previewPhrasesInterval) {
+        clearInterval(previewPhrasesInterval);
+        previewPhrasesInterval = null;
     }
 
-    // --- Phase Management ---
+    // Delegate UI updates to helpers
+    _setDownloadVisualPhase(phase);
+    _updateDownloadProgressBarDisplay(percent, phase);
+    _updateDownloadProgressTextDisplay(percent, message, phase);
+
+    if (phase) {
+        // Show progress container and hide download button
+        progressContainer.style.display = 'block';
+        progressContainer.classList.add('displayed');
+        if(downloadSection) downloadSection.style.display = 'none';
+    } else {
+        // Phase is null: Hide the progress container, show download button
+        resetDownloadUI(); // Use the centralized reset function
+    }
+}
+
+// --- Download Progress Helper Functions ---
+
+function _setDownloadVisualPhase(phase) {
     document.body.classList.remove('validating-active', 'downloading-active', 'decrypting-active', 'complete-active', 'error-active');
+    const fishLogo = document.querySelector('.preview-logo');
     if (fishLogo) {
        fishLogo.classList.remove('validating', 'downloading', 'decrypting', 'complete', 'error');
     }
@@ -431,121 +458,94 @@ function updateDownloadProgress(percent = null, message = null, phase = null) {
         if (fishLogo) {
            fishLogo.classList.add(phase);
         }
-        
-        // Show progress container and hide download button
-        progressContainer.style.display = 'block';
-        progressContainer.classList.add('displayed');
-        if(downloadSection) downloadSection.style.display = 'none';
-        
-        // --- Progress Bar Style ---
-        progressBar.classList.remove('indefinite'); // Reset indefinite state
-        progressBar.style.transition = 'width 0.2s ease-in-out'; // Default transition
-        progressBar.style.backgroundColor = ''; // Reset color
+    }
+}
 
-        if (phase === 'validating' || phase === 'decrypting') {
-            progressBar.classList.add('indefinite');
-            progressBar.style.width = '100%';
-            progressBar.style.transition = 'none';
-        } else if (phase === 'downloading' && percent !== null) {
-            progressBar.style.width = Math.max(0, Math.min(100, percent)) + '%';
-        } else if (phase === 'complete') {
-            progressBar.style.width = '100%';
-            progressBar.style.backgroundColor = '#27ae60'; // Green for complete
-        } else if (phase === 'error') {
-            progressBar.style.width = '100%';
-            progressBar.style.backgroundColor = '#e74c3c'; // Red for error
-        } else {
-            // Default/fallback state (e.g., initializing)
-            progressBar.style.width = (percent !== null ? percent : 0) + '%';
-        }
-        
-        // --- Progress Text & Phrases ---
-        let textContent = message; // Use provided message by default
-        
-        // Start interval only for ongoing phases
-        if (phase === 'downloading' || phase === 'decrypting' || phase === 'validating') {
-             // Set initial text if message is null
-             if (!textContent) {
-                 if (phase === 'downloading') {
-                     textContent = (percent !== null ? percent : 0) + '% - ' + getRandomDownloadingPhrase();
-                 } else if (phase === 'decrypting') {
-                     textContent = getRandomDecryptingPhrase();
-                 } else { // validating
-                     textContent = "Validating..."; // Default validation text
-                 }
-             }
-             
-             // Start interval
-             window.previewPhraseInterval = setInterval(() => {
-                if (phase === 'downloading') {
-                    const currentPercent = parseInt(progressBar.style.width) || 0;
-                    progressText.textContent = currentPercent + '% - ' + getRandomDownloadingPhrase();
-                } else if (phase === 'decrypting') {
-                     progressText.textContent = getRandomDecryptingPhrase();
-                } else { // validating - typically short, maybe no interval needed?
-                     // Optionally rotate validating phrases if we add them
-                     // progressText.textContent = getRandomValidatingPhrase(); 
-                }
-             }, 5000); // Rotate every 5 seconds
-        }
-        
-        // Set the final text content
-        progressText.textContent = textContent;
+function _updateDownloadProgressBarDisplay(percent, phase) {
+    const progressBar = DOM.byId('downloadProgressBar');
+    if (!progressBar) return;
 
+    progressBar.classList.remove('indefinite');
+    progressBar.style.transition = 'width 0.2s ease-in-out';
+    progressBar.style.backgroundColor = ''; // Reset color
+
+    if (phase === 'validating' || phase === 'decrypting') {
+        progressBar.classList.add('indefinite');
+        progressBar.style.width = '100%';
+        progressBar.style.transition = 'none';
+    } else if (phase === 'downloading' && percent !== null) {
+        progressBar.style.width = Math.max(0, Math.min(100, percent)) + '%';
+    } else if (phase === 'complete') {
+        progressBar.style.width = '100%';
+        progressBar.style.backgroundColor = '#27ae60'; // Green
+    } else if (phase === 'error') {
+        progressBar.style.width = '100%';
+        progressBar.style.backgroundColor = '#e74c3c'; // Red
     } else {
-        // Phase is null: Hide the progress container, show download button
-        progressContainer.style.display = 'none';
-        progressContainer.classList.remove('displayed');
-        if(downloadSection) downloadSection.style.display = 'flex';
+        progressBar.style.width = (percent !== null ? Math.max(0, Math.min(100, percent)) : 0) + '%';
     }
 }
 
-// Copy link to clipboard
-function copyLinkToClipboard() {
-    const link = window.location.href;
+function _updateDownloadProgressTextDisplay(percent, message, phase) {
+    const progressText = DOM.byId('downloadProgressText');
+    const progressBar = DOM.byId('downloadProgressBar'); // Needed for interval
+    if (!progressText || !progressBar) return;
 
-    // Use the modern Clipboard API first
-    if (navigator.clipboard) {
-        navigator.clipboard.writeText(link)
-            .then(() => updateCopyButton('Copied!'))
-            .catch(err => {
-                console.error('Clipboard API error:', err);
-                fallbackCopyToClipboard(link);
-            });
-        return;
+    // Clear existing interval
+    if (previewPhrasesInterval) {
+        clearInterval(previewPhrasesInterval);
+        previewPhrasesInterval = null;
     }
-    
-    // Fallback for browsers without clipboard API
-    fallbackCopyToClipboard(link);
+
+    let textContent = message;
+    let startRotation = false;
+
+    // Determine text and if rotation is needed
+    if (phase === 'downloading' || phase === 'decrypting' || phase === 'validating') {
+         if (!textContent) {
+             if (phase === 'downloading') {
+                 textContent = (percent !== null ? percent : 0) + '% - ' + getRandomDownloadingPhrase();
+                 startRotation = true;
+             } else if (phase === 'decrypting') {
+                 textContent = getRandomDecryptingPhrase();
+                 startRotation = true;
+             } else { // validating
+                 textContent = "Validating...";
+                 // Optionally start rotation for validating if desired
+                 // startRotation = true;
+             }
+         }
+          else if (phase !== 'complete' && phase !== 'error') {
+               startRotation = true;
+          }
+    }
+     else if (phase === 'complete' && !textContent) {
+         textContent = 'Complete!';
+     } else if (phase === 'error' && !textContent) {
+          textContent = 'Error!'; // Generic error if no message provided
+     }
+
+    // Set the text
+    progressText.textContent = textContent || ' '; // Default to empty space
+
+    // Start interval if needed
+    if (startRotation) {
+        previewPhrasesInterval = setInterval(() => {
+           if (phase === 'downloading') {
+               const currentPercent = parseInt(progressBar.style.width) || 0;
+               progressText.textContent = currentPercent + '% - ' + getRandomDownloadingPhrase();
+           } else if (phase === 'decrypting') {
+                progressText.textContent = getRandomDecryptingPhrase();
+           } else { // validating - clear interval if it runs unexpectedly
+                // progressText.textContent = getRandomValidatingPhrase();
+                if (previewPhrasesInterval) clearInterval(previewPhrasesInterval);
+                 previewPhrasesInterval = null;
+           }
+        }, 5000);
+    }
 }
 
-// Fallback copy method for older browsers
-function fallbackCopyToClipboard(text) {
-    try {
-        const textArea = document.createElement('textarea');
-        textArea.value = text;
-        
-        // Avoid scrolling to bottom
-        textArea.style.cssText = 'position:fixed;top:0;left:0;width:2em;height:2em;padding:0;border:none;outline:none;box-shadow:none;background:transparent;';
-        
-        document.body.appendChild(textArea);
-        textArea.focus();
-        textArea.select();
-        
-        const successful = document.execCommand('copy');
-        document.body.removeChild(textArea);
-        
-        if (successful) {
-            updateCopyButton('Copied!');
-        } else {
-            console.error('Fallback: Copy command was unsuccessful');
-            updateCopyButton('Copy failed!');
-        }
-    } catch (err) {
-        console.error('Fallback: Could not copy text:', err);
-        updateCopyButton('Copy failed!');
-    }
-}
+// --- End Download Progress Helper Functions ---
 
 // Update copy button text with animation
 function updateCopyButton(text) {
@@ -560,18 +560,7 @@ function updateCopyButton(text) {
     }, 2000);
 }
 
-// Export functions
+// Export main initialization function
 if (typeof module !== 'undefined') {
-    module.exports = {
-        initializePreviewPage,
-        handleEncryptedPreview,
-        validateEncryptionSample,
-        hidePreviewContainers,
-        validateEncryptionKeyFormat,
-        hideDownloadOptions,
-        hideDecryptionProgress,
-        showDecryptionProgress,
-        handleEncryptedDownload,
-        copyLinkToClipboard
-    };
+    module.exports = { initializePreviewPage };
 } 
