@@ -1694,4 +1694,56 @@ select:focus {
     .tab-content {
         padding: 0 10px 10px 10px;
     }
-} 
+}
+
+/* --- History Tab Styles --- */
+
+.history-list-container {
+    margin-top: 15px;
+}
+
+.history-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 15px;
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+    margin-bottom: 10px;
+    background-color: #fff;
+}
+
+.history-item:last-child {
+    margin-bottom: 0;
+}
+
+.history-item-details {
+    display: flex;
+    flex-direction: column;
+    gap: 4px; /* Spacing between info lines */
+    flex-grow: 1;
+    margin-right: 15px; /* Space before actions */
+}
+
+.history-item-filename {
+    font-weight: 600;
+    color: #333;
+}
+
+.history-item-info {
+    font-size: 0.85em;
+    color: #666;
+}
+
+.history-item-actions {
+    display: flex;
+    align-items: center;
+}
+
+/* Adjust button size in history */
+.history-item-actions .btn-sm {
+    padding: 4px 8px;
+    font-size: 0.8em;
+}
+
+/* --- End History Tab Styles --- */ 

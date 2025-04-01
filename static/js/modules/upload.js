@@ -168,8 +168,8 @@ function initializeUploader() {
             // Update progress to show encryption state
             updateProgress(20, getRandomEncryptionPhrase(), 'encrypting');
 
-            // Encrypt the file before upload
-            encryptAndUpload(file).catch(error => {
+            // Encrypt the file before upload (pass isTextUpload = false)
+            encryptAndUpload(file, false).catch(error => {
                 // This ensures any unhandled errors are properly shown to the user
                 console.error('Upload process failed:', error);
                 showError('Upload failed: ' + error.message);
@@ -177,7 +177,7 @@ function initializeUploader() {
             });
         } else {
             // If not encrypting, proceed with normal upload
-            processRegularUpload(file);
+            processRegularUpload(file, false); // pass isTextUpload = false
         }
     }
 
@@ -715,7 +715,7 @@ function initializeUploader() {
     // --- End ChunkedUploader Class ---
 
     // Handle encryption and upload
-    async function encryptAndUpload(file) {
+    async function encryptAndUpload(file, isTextUpload) {
         let sampleInput = null;
         let uploader = null; // To potentially access uploader state if needed, though callbacks are preferred
         try {
@@ -759,8 +759,34 @@ function initializeUploader() {
                         updateProgress(progress.percent, progress, 'uploading');
                     },
                     onSuccess: (result) => {
+                        // --- Save to History ---
+                        try {
+                            const uploadTime = Date.now();
+                            // Use jsExpiry which is common for both, ensure formExpiryInput has the right value
+                            const expiryValue = elements.formExpiryInput.value;
+                            const expiryTime = parseExpiryValueToTimestamp(expiryValue, uploadTime); 
+                            
+                            const historyItem = {
+                                id: result.file_id, // Assume finalize returns file_id
+                                filename: result.filename || file.name, // Use result filename, fallback to original
+                                size: result.size || file.size, // Use result size, fallback to original
+                                url: result.url || `/file/${result.file_id}`, // Use result url, fallback to constructing it
+                                key: encryptionKey, // Store the key for encrypted uploads
+                                uploadTime: uploadTime,
+                                expiryValue: expiryValue,
+                                expiryTime: expiryTime, // Calculated timestamp or null
+                                isTextUpload: isTextUpload, // Passed parameter
+                                isEncrypted: true
+                            };
+                            saveToHistory(historyItem);
+                        } catch (histError) {
+                            console.error("Failed to save to history:", histError);
+                        }
+                        // --- End Save to History ---
+
                         setTimeout(() => {
-                            window.location.href = result.redirect_url + '#' + encryptionKey;
+                            // Use result.url as the redirect URL
+                            window.location.href = (result.url || `/file/${result.file_id}`) + '#' + encryptionKey;
                         }, 500);
                          if (sampleInput && sampleInput.parentNode) { // Cleanup sample input on success
                              elements.uploadForm.removeChild(sampleInput);
@@ -803,7 +829,7 @@ function initializeUploader() {
     }
 
     // Process regular, unencrypted upload (Now uses ChunkedUploader)
-    function processRegularUpload(file) {
+    function processRegularUpload(file, isTextUpload) {
         updateProgress(0, "Preparing upload...", 'uploading');
 
         setTimeout(() => {
@@ -815,8 +841,34 @@ function initializeUploader() {
                     updateProgress(progress.percent, progress, 'uploading');
                 },
                 onSuccess: (result) => {
+                    // --- Save to History ---
+                    try {
+                        const uploadTime = Date.now();
+                        // Use jsExpiry which is common for both, ensure formExpiryInput has the right value
+                        const expiryValue = elements.formExpiryInput.value; 
+                        const expiryTime = parseExpiryValueToTimestamp(expiryValue, uploadTime); 
+                        
+                        const historyItem = {
+                            id: result.file_id, // Assume finalize returns file_id
+                            filename: result.filename || file.name,
+                            size: result.size || file.size,
+                            url: result.url || `/file/${result.file_id}`,
+                            key: null, // No key for unencrypted
+                            uploadTime: uploadTime,
+                            expiryValue: expiryValue,
+                            expiryTime: expiryTime, // Calculated timestamp or null
+                            isTextUpload: isTextUpload, // Passed parameter
+                            isEncrypted: false
+                        };
+                        saveToHistory(historyItem);
+                    } catch (histError) {
+                        console.error("Failed to save to history:", histError);
+                    }
+                    // --- End Save to History ---
+
                     setTimeout(() => {
-                        window.location.href = result.redirect_url;
+                        // Use result.url as the redirect URL
+                        window.location.href = result.url || `/file/${result.file_id}`;
                     }, 500);
                     // No need to call resetUploadUI on success
                 },
@@ -1142,14 +1194,14 @@ function initializeUploader() {
         if (shouldEncrypt) {
             updateProgress(20, getRandomEncryptionPhrase(), 'encrypting');
             // Pass the textFile object to encryptAndUpload
-            encryptAndUpload(textFile).catch(error => {
+            encryptAndUpload(textFile, true).catch(error => {
                 console.error('Text upload process failed (encryption):', error);
                 showError('Text upload failed: ' + error.message);
                 resetUploadUI();
             });
         } else {
             // Pass the textFile object to processRegularUpload
-            processRegularUpload(textFile);
+            processRegularUpload(textFile, true); // Pass isTextUpload = true
         }
     }
     // --- End Handle Text Upload ---

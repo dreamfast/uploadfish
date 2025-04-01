@@ -182,10 +182,10 @@
                             <div class="form-group">
                                 <label for="textExpiry">Expiration Time</label>
                                 <select name="expiry" id="textExpiry">
-                                    <option value="when_downloaded">When Downloaded</option> 
                                     {{range .ExpiryOptions}}
                                     <option value="{{.Value}}">{{.Label}}</option>
                                     {{end}}
+                                    <option value="when_downloaded">When Downloaded</option>
                                 </select>
                             </div>
                         </div>
@@ -198,11 +198,16 @@
 
                  <!-- History Tab Content (Placeholder) -->
                 <div id="history-tab" class="tab-content" style="display: none;">
-                     <h2>Upload History</h2>
-                     <p>Your upload history will appear here.</p>
-                     <div id="historyList"></div>
+                    <h2>Upload History</h2>
+                    <p>Files you have uploaded in this browser will appear here.</p>
+                    <div id="historyList" class="history-list-container">
+                        <!-- History items will be dynamically inserted here -->
+                    </div>
+                    <p id="historyEmptyMsg" style="display: none; margin-top: 15px;">Your upload history is empty.</p>
+                    <div class="history-actions" style="margin-top: 20px;">
+                         <button class="btn btn-secondary" id="clearHistoryBtn">Clear History</button>
+                    </div>
                 </div> <!-- End of history-tab -->
-
             </div>
         </div>
         

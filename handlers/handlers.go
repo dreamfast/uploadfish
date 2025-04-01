@@ -1393,3 +1393,62 @@ func jsonResponse(w http.ResponseWriter, data map[string]interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(data)
 }
+
+// combineChunksAndDetectType combines chunk files into a final file and detects MIME type.
+func combineChunksAndDetectType(chunksDir, finalPath string, totalChunks int) (string, error) {
+	finalFile, err := os.Create(finalPath)
+	if err != nil {
+		LogError(err, "Error creating final file path", map[string]interface{}{"final_path": finalPath})
+		return "", fmt.Errorf("server error creating final file")
+	}
+	defer finalFile.Close()
+
+	// Combine all chunks first
+	for i := 0; i < totalChunks; i++ {
+		chunkPath := filepath.Join(chunksDir, fmt.Sprintf("chunk_%d", i))
+		chunkFile, err := os.Open(chunkPath)
+		if err != nil {
+			LogError(err, "Error opening chunk file for combining", map[string]interface{}{"chunk_path": chunkPath, "chunk_index": i})
+			finalFile.Close()        // Close the potentially partially written file
+			_ = os.Remove(finalPath) // Attempt cleanup
+			return "", fmt.Errorf("error reading chunk %d", i)
+		}
+
+		_, err = io.Copy(finalFile, chunkFile)
+		chunkFile.Close() // Close chunk immediately
+		if err != nil {
+			LogError(err, "Error copying chunk data to final file", map[string]interface{}{"chunk_path": chunkPath, "chunk_index": i})
+			finalFile.Close()
+			_ = os.Remove(finalPath)
+			return "", fmt.Errorf("error writing chunk %d to final file", i)
+		}
+	}
+
+	// Close the writer to the final file
+	if err := finalFile.Close(); err != nil {
+		LogError(err, "Error closing final file after writing chunks", map[string]interface{}{"final_path": finalPath})
+		_ = os.Remove(finalPath)
+		return "", fmt.Errorf("error finalizing file write")
+	}
+
+	// Now, reopen the combined file to detect its type from the beginning
+	fileForDetect, err := os.Open(finalPath)
+	if err != nil {
+		LogError(err, "Error reopening final file for type detection", map[string]interface{}{"final_path": finalPath})
+		return "", fmt.Errorf("error opening file for type detection")
+	}
+	defer fileForDetect.Close()
+
+	// Read the first 512 bytes for type detection
+	buffer := make([]byte, 512)
+	n, err := fileForDetect.Read(buffer)
+	if err != nil && err != io.EOF {
+		LogError(err, "Error reading from final file for type detection", map[string]interface{}{"final_path": finalPath})
+		return "", fmt.Errorf("error reading file for type detection")
+	}
+
+	// Detect content type
+	detectedContentType := http.DetectContentType(buffer[:n])
+
+	return detectedContentType, nil
+}
