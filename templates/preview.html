@@ -98,6 +98,13 @@
                 {{end}}
             </div>
 
+            {{/* Warning for 'When Viewed' expiry */}}
+            {{if eq .ExpiryValue "when_downloaded"}}
+            <div class="expiry-warning" style="background-color: #fff3cd; border-left: 4px solid #ffeeba; padding: 10px 15px; margin: 15px 0; border-radius: 4px; color: #856404;">
+                <p style="margin: 0;"><strong>Note:</strong> This file is set to expire <strong>when viewed</strong>. Downloading the file may permanently delete it.</p>
+            </div>
+            {{end}}
+
             <div class="file-details">
                 <div class="detail-row">
                     <span class="detail-label">Filename:</span>

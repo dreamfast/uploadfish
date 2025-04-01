@@ -15,7 +15,6 @@ import (
 
 	"uploadfish/config"
 	"uploadfish/models"
-	"uploadfish/utils"
 )
 
 // Logger interface defines the logging methods needed by the storage package
@@ -26,18 +25,17 @@ type Logger interface {
 
 const (
 	// Prefix for content entries in BitCask
-	contentPrefix = "content:"
+	contentPrefix = "content:" // Keep as string for now, byte conversion is explicit
 	// Prefix for metadata entries in BitCask
-	metadataPrefix = "meta:"
+	metadataPrefix = "meta:" // Keep as string for now
 )
 
 // Storage handles file metadata persistence and cleanup
 type Storage struct {
 	db        *bitcask.Bitcask
 	config    *config.Config
-	mutex     sync.Mutex
+	mutex     sync.RWMutex
 	closeOnce sync.Once
-	files     map[string]models.File
 	logger    Logger
 }
 
@@ -68,7 +66,6 @@ func New(cfg *config.Config, logger Logger) (*Storage, error) {
 	s := &Storage{
 		db:     db,
 		config: cfg,
-		files:  make(map[string]models.File),
 		logger: logger,
 	}
 
@@ -147,8 +144,8 @@ func (s *Storage) SaveFile(fileMetadata *models.File, contentReader io.Reader) e
 
 // GetFile retrieves file metadata by ID
 func (s *Storage) GetFile(id string) (*models.File, error) {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
 
 	// Get metadata from database
 	metadataKey := []byte(metadataPrefix + id)
@@ -166,25 +163,34 @@ func (s *Storage) GetFile(id string) (*models.File, error) {
 	return file, nil
 }
 
-// GetFileContent retrieves file content by ID
-func (s *Storage) GetFileContent(id string) ([]byte, error) {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
-
-	// Get content from database
+// GetFileContentStream retrieves a reader for the decompressed file content by ID.
+// The caller is responsible for closing the returned io.ReadCloser.
+// This reads the compressed data into memory but streams the decompression.
+func (s *Storage) GetFileContentStream(id string) (io.ReadCloser, error) {
+	s.mutex.RLock() // Lock for reading from DB
+	// Get compressed content from database
 	contentKey := []byte(contentPrefix + id)
 	compressedData, err := s.db.Get(contentKey)
+	s.mutex.RUnlock() // Unlock BEFORE returning the reader
+
 	if err != nil {
-		return nil, fmt.Errorf("failed to get file content: %w", err)
+		if err == bitcask.ErrKeyNotFound {
+			return nil, err // Return specific error for not found
+		}
+		return nil, fmt.Errorf("failed to get file content stream: %w", err)
 	}
 
-	// Decompress the content
-	content, err := utils.Decompress(compressedData)
+	// Create a reader for the compressed data
+	compressedReader := bytes.NewReader(compressedData)
+
+	// Create a gzip reader to decompress on the fly
+	gzReader, err := gzip.NewReader(compressedReader)
 	if err != nil {
-		return nil, fmt.Errorf("failed to decompress file content: %w", err)
+		return nil, fmt.Errorf("failed to create gzip reader: %w", err)
 	}
 
-	return content, nil
+	// gzReader is an io.ReadCloser, return it directly
+	return gzReader, nil
 }
 
 // DeleteFile removes file metadata and content
@@ -209,8 +215,8 @@ func (s *Storage) DeleteFile(id string) error {
 
 // ListExpiredFiles returns a list of file IDs that have expired
 func (s *Storage) ListExpiredFiles() ([]string, error) {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
 
 	var expiredIDs []string
 	now := time.Now()
@@ -220,12 +226,16 @@ func (s *Storage) ListExpiredFiles() ([]string, error) {
 		// Get the file metadata
 		data, err := s.db.Get(key)
 		if err != nil {
+			// Log error getting data but continue scan
+			s.logger.Error(err, "Failed to get metadata during expired scan", map[string]interface{}{"key": string(key)})
 			return nil // Continue with next key
 		}
 
 		// Parse the metadata
 		file := &models.File{}
 		if err := file.FromJSON(data); err != nil {
+			// Log error parsing data but continue scan
+			s.logger.Error(err, "Failed to parse metadata during expired scan", map[string]interface{}{"key": string(key)})
 			return nil // Continue with next key
 		}
 

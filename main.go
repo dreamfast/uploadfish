@@ -6,28 +6,18 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"runtime"
-	"strings"
 	"syscall"
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
+	chi_middleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 
 	"uploadfish/config"
 	"uploadfish/handlers"
+	"uploadfish/middleware"
 	"uploadfish/storage"
 	"uploadfish/utils"
-)
-
-// Define custom type for context keys to avoid collisions
-type contextKey string
-
-// Define constants for context keys
-const (
-	contextKeyCSPNonce  contextKey = "csp-nonce"
-	contextKeyRequestID contextKey = "request-id"
 )
 
 // StorageLogger implements the storage.Logger interface
@@ -56,6 +46,11 @@ func main() {
 	handlers.LogErrorFunc = LogError
 	handlers.LogInfoFunc = LogInfo
 	handlers.LogDebugFunc = LogDebug
+
+	// Set up middleware package logging functions
+	middleware.LogInfo = LogInfo
+	middleware.LogError = LogError
+	middleware.LogDebug = LogDebug
 
 	// Load configuration
 	cfg := config.New()
@@ -94,12 +89,12 @@ func main() {
 	r := chi.NewRouter()
 
 	// Add standard middlewares
-	r.Use(middleware.RealIP)
-	r.Use(requestIDMiddleware)    // Add request ID to each request
-	r.Use(loggingMiddleware)      // Our structured logging middleware
-	r.Use(customRecoverer)        // Custom recovery middleware with better logging
-	r.Use(middleware.Compress(5)) // Add compression middleware with level 5
-	r.Use(middleware.Timeout(30 * time.Minute))
+	r.Use(chi_middleware.RealIP)
+	r.Use(middleware.RequestIDMiddleware)
+	r.Use(middleware.LoggingMiddleware)
+	r.Use(middleware.CustomRecoverer)
+	r.Use(chi_middleware.Compress(5))
+	r.Use(chi_middleware.Timeout(30 * time.Minute))
 
 	// Add CORS middleware
 	r.Use(cors.Handler(cors.Options{
@@ -111,78 +106,13 @@ func main() {
 	}))
 
 	// Add security headers middleware
-	r.Use(securityHeadersMiddleware)
+	r.Use(middleware.SecurityHeadersMiddleware)
 
 	// Add rate limiter middleware
-	r.Use(func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Skip rate limiting for static resources
-			if strings.HasPrefix(r.URL.Path, "/static/") || r.URL.Path == "/health" {
-				next.ServeHTTP(w, r)
-				return
-			}
-
-			// Get client IP
-			ip := r.RemoteAddr
-			if forwardedFor := r.Header.Get("X-Forwarded-For"); forwardedFor != "" {
-				ip = strings.Split(forwardedFor, ",")[0]
-			}
-
-			// Apply stricter rate limits for standard uploads, bypass for chunked uploads
-			if r.Method == "POST" && r.URL.Path == "/upload" {
-				if !uploadRateLimiter.Allow(ip) {
-					LogInfo("Rate limit exceeded for upload", map[string]interface{}{
-						"ip":   ip,
-						"path": r.URL.Path,
-					})
-					http.Error(w, "Upload rate limit exceeded", http.StatusTooManyRequests)
-					return
-				}
-			} else if r.Method == "POST" && r.URL.Path == "/upload/chunk" {
-				// Use a very permissive rate limiter for chunks, with higher log visibility
-				if !chunkUploadRateLimiter.Allow(ip) {
-					LogInfo("Rate limit exceeded for chunk upload", map[string]interface{}{
-						"ip":   ip,
-						"path": r.URL.Path,
-					})
-					http.Error(w, "Chunk upload rate limit exceeded", http.StatusTooManyRequests)
-					return
-				}
-			} else if r.Method == "POST" && r.URL.Path == "/upload/finalize" {
-				// Skip rate limiting for finalization to ensure uploads complete
-			} else {
-				// Regular rate limit for other endpoints
-				if !apiRateLimiter.Allow(ip) {
-					LogInfo("Rate limit exceeded", map[string]interface{}{
-						"ip":   ip,
-						"path": r.URL.Path,
-					})
-					http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
-					return
-				}
-			}
-
-			next.ServeHTTP(w, r)
-		})
-	})
+	r.Use(middleware.RateLimiterMiddleware(uploadRateLimiter, chunkUploadRateLimiter, apiRateLimiter))
 
 	// Add body size limiting middleware for non-upload endpoints
-	r.Use(func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Skip for upload endpoints and static resources
-			if r.URL.Path == "/upload" ||
-				r.URL.Path == "/upload/chunk" ||
-				r.URL.Path == "/upload/finalize" ||
-				strings.HasPrefix(r.URL.Path, "/static/") {
-				next.ServeHTTP(w, r)
-				return
-			}
-
-			// Limit body size to 1MB for all other endpoints
-			r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
-			next.ServeHTTP(w, r)
-		})
-	})
+	r.Use(middleware.BodyLimiterMiddleware())
 
 	// Create handlers
 	h := handlers.New(cfg, store, csrfProtection)
@@ -206,7 +136,7 @@ func main() {
 
 	// Serve static files
 	fileServer := http.FileServer(http.Dir("static"))
-	r.Handle("/static/*", cacheControlMiddleware(http.StripPrefix("/static", fileServer)))
+	r.Handle("/static/*", middleware.CacheControlMiddleware(http.StripPrefix("/static", fileServer)))
 
 	// Create server
 	addr := fmt.Sprintf(":%s", cfg.Port)
@@ -249,159 +179,6 @@ func main() {
 	}
 
 	Logger.Info().Msg("Server gracefully stopped")
-}
-
-// loggingMiddleware is a custom middleware that uses our structured logging
-func loggingMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
-
-		// Get request ID from context if available
-		requestID, _ := r.Context().Value(contextKeyRequestID).(string)
-
-		// Wrap the response writer to capture the status code
-		ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
-
-		// Call the next handler
-		next.ServeHTTP(ww, r)
-
-		// Calculate duration
-		duration := time.Since(start)
-
-		// Prepare fields for logging
-		fields := map[string]interface{}{
-			"status":      ww.Status(),
-			"bytes":       ww.BytesWritten(),
-			"method":      r.Method,
-			"path":        r.URL.Path,
-			"remote_addr": r.RemoteAddr,
-			"duration_ms": duration.Milliseconds(),
-		}
-
-		// Add request ID if available
-		if requestID != "" {
-			fields["request_id"] = requestID
-		}
-
-		// Add user agent
-		if ua := r.UserAgent(); ua != "" {
-			fields["user_agent"] = ua
-		}
-
-		// Log based on status code
-		if ww.Status() >= 500 {
-			LogError(nil, "Server error", fields)
-		} else if ww.Status() >= 400 {
-			LogInfo("Client error", fields)
-		} else {
-			LogInfo("Request completed", fields)
-		}
-	})
-}
-
-// securityHeadersMiddleware adds security headers to responses
-func securityHeadersMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Generate a nonce for CSP
-		nonce := utils.GenerateRandomString(16)
-
-		// Store the nonce in the request context for use in templates
-		ctx := context.WithValue(r.Context(), contextKeyCSPNonce, nonce)
-		r = r.WithContext(ctx)
-
-		// Set security headers
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("X-Frame-Options", "DENY")
-		w.Header().Set("X-XSS-Protection", "1; mode=block")
-		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
-		w.Header().Set("Permissions-Policy", "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()")
-
-		// Strict CSP configuration with nonce instead of unsafe-inline
-		w.Header().Set("Content-Security-Policy",
-			"default-src 'none'; "+
-				"script-src 'self' 'nonce-"+nonce+"'; "+ // No need for script-src-elem with script-src
-				"style-src 'self' 'nonce-"+nonce+"' 'unsafe-inline'; "+ // Use nonce for styles
-				"style-src-attr 'unsafe-inline'; "+ // Allow inline style attributes
-				"img-src 'self' data: blob:; "+ // Allow images and file previews
-				"media-src 'self' data: blob:; "+ // For audio/video previews
-				"connect-src 'self'; "+ // Only allow API calls to same origin
-				"font-src 'self'; "+ // Only allow self-hosted fonts
-				"frame-ancestors 'none'; "+ // Prevent framing (anti-clickjacking)
-				"form-action 'self'; "+ // Only allow forms to submit to same origin
-				"base-uri 'self'; "+ // Restrict base URI
-				"manifest-src 'self'; "+ // For web manifest
-				"worker-src 'self' blob:; "+ // For Web Workers if needed
-				"object-src 'none'; "+ // Disallow plugins like Flash
-				"upgrade-insecure-requests")
-
-		next.ServeHTTP(w, r)
-	})
-}
-
-// requestIDMiddleware adds a unique request ID to each request
-func requestIDMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Generate a unique request ID or use X-Request-ID from header if present
-		requestID := r.Header.Get("X-Request-ID")
-		if requestID == "" {
-			requestID = utils.GenerateRandomString(16) // Generate random ID
-		}
-
-		// Set the request ID in a response header
-		w.Header().Set("X-Request-ID", requestID)
-
-		// Store request ID in context for logging
-		ctx := context.WithValue(r.Context(), contextKeyRequestID, requestID)
-		r = r.WithContext(ctx)
-
-		next.ServeHTTP(w, r)
-	})
-}
-
-// customRecoverer is a custom middleware that recovers from panics and logs them
-func customRecoverer(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer func() {
-			if rvr := recover(); rvr != nil {
-				// Get stack trace
-				buf := make([]byte, 4096)
-				n := runtime.Stack(buf, false)
-				stackTrace := string(buf[:n])
-
-				// Get request ID from context
-				requestID, _ := r.Context().Value(contextKeyRequestID).(string)
-
-				// Log the panic with context
-				LogError(fmt.Errorf("%v", rvr), "Panic recovered", map[string]interface{}{
-					"request_id":  requestID,
-					"method":      r.Method,
-					"path":        r.URL.Path,
-					"remote_addr": r.RemoteAddr,
-					"stack_trace": stackTrace,
-				})
-
-				// Return Internal Server Error
-				http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-			}
-		}()
-
-		next.ServeHTTP(w, r)
-	})
-}
-
-// cacheControlMiddleware adds cache headers for static assets
-func cacheControlMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Skip cache headers for HTML files
-		if !strings.HasSuffix(r.URL.Path, ".html") {
-			// Set caching headers for static assets (1 week)
-			w.Header().Set("Cache-Control", "public, max-age=604800, immutable")
-		} else {
-			// No caching for HTML files
-			w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-		}
-		next.ServeHTTP(w, r)
-	})
 }
 
 // checkDependencies verifies all required dependencies are available

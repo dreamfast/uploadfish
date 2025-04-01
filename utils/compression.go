@@ -37,17 +37,16 @@ func Decompress(data []byte) ([]byte, error) {
 
 // Base64Encode encodes data to URL-safe base64
 func Base64Encode(data []byte) string {
-	encoded := base64.StdEncoding.EncodeToString(data)
-	// Make URL safe
-	return strings.ReplaceAll(strings.ReplaceAll(encoded, "+", "-"), "/", "_")
+	// Use the standard library's URL-safe encoding
+	return base64.URLEncoding.EncodeToString(data)
 }
 
-// Base64Decode decodes URL-safe base64 to bytes
+// Base64Decode decodes standard base64 to bytes (Reverted from URL-safe)
 func Base64Decode(encoded string) ([]byte, error) {
-	// Restore standard base64
+	// Restore standard base64 characters if they were URL-encoded (though input is expected to be standard)
 	standardBase64 := strings.ReplaceAll(strings.ReplaceAll(encoded, "-", "+"), "_", "/")
 
-	// Add padding if needed
+	// Add padding if needed for standard decoding
 	switch len(standardBase64) % 4 {
 	case 2:
 		standardBase64 += "=="
@@ -55,5 +54,6 @@ func Base64Decode(encoded string) ([]byte, error) {
 		standardBase64 += "="
 	}
 
+	// Use standard decoder
 	return base64.StdEncoding.DecodeString(standardBase64)
 }

@@ -1,7 +1,6 @@
 package utils
 
 import (
-	"net"
 	"sync"
 	"time"
 )
@@ -35,17 +34,13 @@ func NewRateLimiter(maxRequests int, windowLength, cleanup time.Duration) *RateL
 	return limiter
 }
 
-// Allow checks if a request from an IP should be allowed
+// Allow checks if a request from a clean IP should be allowed
+// Assumes ipAddr is just the IP, not IP:port
 func (rl *RateLimiter) Allow(ipAddr string) bool {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 
 	now := time.Now()
-
-	// Extract IP from IP:port if needed
-	if host, _, err := net.SplitHostPort(ipAddr); err == nil {
-		ipAddr = host
-	}
 
 	// Initialize if this is the first request from this IP
 	req, exists := rl.requests[ipAddr]

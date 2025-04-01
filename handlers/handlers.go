@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -21,6 +23,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/prologic/bitcask"
 )
 
 // Handler contains all the dependencies for the handlers
@@ -231,7 +234,7 @@ func (h *Handler) processUploadedFile(file io.ReadSeeker, handler *multipart.Fil
 	}
 
 	// Validate expiry value against allowed options
-	validExpiryValues := map[string]bool{"1h": true, "6h": true, "24h": true, "72h": true}
+	validExpiryValues := map[string]bool{"1h": true, "6h": true, "24h": true, "72h": true, "when_downloaded": true}
 	if !validExpiryValues[expiryValue] {
 		LogInfo("Invalid expiry value provided, using default", map[string]interface{}{
 			"provided_expiry": expiryValue,
@@ -240,8 +243,11 @@ func (h *Handler) processUploadedFile(file io.ReadSeeker, handler *multipart.Fil
 		expiryValue = "1h" // Default to 1 hour if invalid
 	}
 
-	expiryDuration := models.ParseExpiryDuration(expiryValue)
-	expiryTime := time.Now().Add(expiryDuration)
+	var expiryTime time.Time
+	if expiryValue != "when_downloaded" {
+		expiryDuration := models.ParseExpiryDuration(expiryValue)
+		expiryTime = time.Now().Add(expiryDuration)
+	} // else leave expiryTime as zero for "when_downloaded"
 
 	// Check if the file is encrypted client-side
 	isEncrypted := false
@@ -317,7 +323,8 @@ func (h *Handler) processUploadedFile(file io.ReadSeeker, handler *multipart.Fil
 		MimeType:        contentType,
 		Size:            size, // Use size obtained from seeking
 		UploadTime:      time.Now(),
-		ExpiryTime:      expiryTime,
+		ExpiryValue:     expiryValue, // Store raw value
+		ExpiryTime:      expiryTime,  // Store calculated time (or zero)
 		IsEncrypted:     isEncrypted,
 		EncryptedSample: encryptedSample,
 	}, nil
@@ -400,12 +407,29 @@ func (h *Handler) ServeFileByID(w http.ResponseWriter, r *http.Request) {
 
 // Helper function to serve file content
 func serveFileContent(w http.ResponseWriter, r *http.Request, storage *storage.Storage, fileMetadata *models.File) {
-	// Get file content
-	content, err := storage.GetFileContent(fileMetadata.ID)
+	// Get file content stream
+	reader, err := storage.GetFileContentStream(fileMetadata.ID)
 	if err != nil {
-		http.Error(w, "Error retrieving file content", http.StatusInternalServerError)
+		if err == bitcask.ErrKeyNotFound { // Handle not found specifically
+			http.Error(w, "File not found", http.StatusNotFound)
+		} else {
+			LogError(err, "Error retrieving file content stream", map[string]interface{}{"file_id": fileMetadata.ID})
+			http.Error(w, "Error retrieving file content", http.StatusInternalServerError)
+		}
 		return
 	}
+	defer reader.Close() // Ensure the stream is closed
+
+	// --- Check for "When Viewed" expiry ---
+	shouldDeleteAfterServe := false
+
+	if fileMetadata.ExpiryValue == "when_downloaded" {
+		shouldDeleteAfterServe = true // Mark for deletion regardless of key
+		LogInfo("'When Viewed' file accessed, scheduling deletion after serve", map[string]interface{}{
+			"file_id": fileMetadata.ID,
+		})
+	}
+	// --------------------------------------
 
 	// Add cache control headers for better performance
 	w.Header().Set("Cache-Control", "no-store")
@@ -432,12 +456,33 @@ func serveFileContent(w http.ResponseWriter, r *http.Request, storage *storage.S
 	// Set content length
 	w.Header().Set("Content-Length", strconv.FormatInt(fileMetadata.Size, 10))
 
-	// Write the content directly to the response
-	if _, err := w.Write(content); err != nil {
-		// Can't send error response here since we've already started writing the response
-		LogError(err, "Error writing file content to response", map[string]interface{}{
+	// Stream the content directly to the response using io.Copy
+	bytesWritten, copyErr := io.Copy(w, reader)
+
+	// --- Execute deletion if scheduled and copy was successful ---
+	if copyErr == nil && shouldDeleteAfterServe {
+		LogInfo("File stream successful, executing 'When Viewed' deletion", map[string]interface{}{
 			"file_id": fileMetadata.ID,
-			"size":    fileMetadata.Size,
+		})
+		if err := storage.DeleteFile(fileMetadata.ID); err != nil {
+			LogError(err, "Error deleting file after 'When Viewed' download", map[string]interface{}{
+				"file_id": fileMetadata.ID,
+			})
+		} else {
+			LogInfo("'When Viewed' file deleted successfully after download", map[string]interface{}{
+				"file_id": fileMetadata.ID,
+			})
+		}
+	}
+	// ---------------------------------------------------------
+
+	// Handle potential errors during copy
+	if copyErr != nil {
+		// Can't send error response here since we've already started writing the response
+		LogError(copyErr, "Error copying file content stream to response", map[string]interface{}{
+			"file_id":       fileMetadata.ID,
+			"size":          fileMetadata.Size,
+			"bytes_written": bytesWritten,
 		})
 	}
 }
@@ -464,6 +509,15 @@ func servePreviewPage(w http.ResponseWriter, r *http.Request, h *Handler, fileMe
 	isVideo := strings.HasPrefix(fileMetadata.MimeType, "video/")
 	isAudio := strings.HasPrefix(fileMetadata.MimeType, "audio/")
 
+	// Generate CSRF token for the page
+	csrfToken, err := h.csrfProtection.GenerateToken() // Handle error
+	if err != nil {
+		LogError(err, "Failed to generate CSRF token for preview page", map[string]interface{}{"file_id": fileMetadata.ID})
+		// Don't panic here, maybe render error or proceed without CSRF?
+		// For now, proceed with an empty token, which might break forms on the page.
+		csrfToken = ""
+	}
+
 	// Prepare template data
 	data := struct {
 		Filename            string
@@ -474,6 +528,7 @@ func servePreviewPage(w http.ResponseWriter, r *http.Request, h *Handler, fileMe
 		UploadTimeFormatted string
 		ExpiryTime          time.Time
 		ExpiryTimeFormatted string
+		ExpiryValue         string
 		FileURL             string
 		ShareURL            string
 		IsPreviewable       bool
@@ -491,13 +546,14 @@ func servePreviewPage(w http.ResponseWriter, r *http.Request, h *Handler, fileMe
 		UploadTimeFormatted: uploadTimeFormatted,
 		ExpiryTime:          fileMetadata.ExpiryTime,
 		ExpiryTimeFormatted: expiryTimeFormatted,
+		ExpiryValue:         fileMetadata.ExpiryValue,
 		FileURL:             fileURL,
 		ShareURL:            shareURL,
 		IsPreviewable:       isPreviewable,
 		IsImage:             isImage,
 		IsVideo:             isVideo,
 		IsAudio:             isAudio,
-		CSRFToken:           h.csrfProtection.GenerateToken(),
+		CSRFToken:           csrfToken,
 		IsEncrypted:         fileMetadata.IsEncrypted,
 	}
 
@@ -813,9 +869,17 @@ func (h *Handler) ChunkUpload(w http.ResponseWriter, r *http.Request) {
 
 	h.chunkStatesMu.Lock() // Lock before accessing shared state
 
+	const maxConcurrent = 3 // Hardcoding for now, ideally from config or constant
+
 	if chunkIndex == 0 {
 		// First chunk: Generate initial chunk secret and calculate tokens for the initial concurrent batch
-		uploadSecret := utils.GenerateRandomString(32) // Secret for this upload session
+		uploadSecret, err := utils.GenerateRandomString(32) // Handle error
+		if err != nil {
+			h.chunkStatesMu.Unlock()
+			LogError(err, "Failed to generate upload secret", nil)
+			jsonError(w, "Server error generating upload secret", http.StatusInternalServerError)
+			return
+		}
 
 		numTokensToSend := totalChunks
 		if numTokensToSend > 3 {
@@ -931,16 +995,16 @@ func (h *Handler) ChunkUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	// Read the chunk content
-	chunkData, err := io.ReadAll(file)
-	if err != nil {
-		LogError(err, "Error reading chunk data", map[string]interface{}{
-			"file_id": fileID,
-			"chunk":   chunkIndex,
-		})
-		jsonError(w, fmt.Sprintf("Error reading chunk: %v", err), http.StatusInternalServerError)
+	// --- START SHA-256 Hash Verification ---
+	clientHash := r.FormValue("chunk_hash")
+	if clientHash == "" {
+		LogInfo("Missing chunk hash", map[string]interface{}{"file_id": fileID, "chunk": chunkIndex})
+		jsonError(w, "Missing chunk hash parameter", http.StatusBadRequest)
 		return
 	}
+
+	// Create hasher
+	hasher := sha256.New()
 
 	// Create temp directory for chunks if it doesn't exist
 	chunksDir := filepath.Join(os.TempDir(), "uploadfish", "chunks", fileID)
@@ -949,21 +1013,66 @@ func (h *Handler) ChunkUpload(w http.ResponseWriter, r *http.Request) {
 			"file_id":    fileID,
 			"chunks_dir": chunksDir,
 		})
-		jsonError(w, "Server error storing chunk", http.StatusInternalServerError)
+		jsonError(w, "Server error preparing chunk storage", http.StatusInternalServerError)
 		return
 	}
 
-	// Write chunk to a temporary file
+	// Prepare path for the temporary chunk file
 	chunkPath := filepath.Join(chunksDir, fmt.Sprintf("chunk_%d", chunkIndex))
-	if err := os.WriteFile(chunkPath, chunkData, 0644); err != nil {
-		LogError(err, "Error writing chunk to disk", map[string]interface{}{
+
+	// Create the temporary chunk file
+	chunkFile, err := os.Create(chunkPath)
+	if err != nil {
+		LogError(err, "Error creating temporary chunk file", map[string]interface{}{
 			"file_id":    fileID,
 			"chunk":      chunkIndex,
 			"chunk_path": chunkPath,
 		})
-		jsonError(w, "Server error storing chunk", http.StatusInternalServerError)
+		jsonError(w, "Server error saving chunk", http.StatusInternalServerError)
 		return
 	}
+
+	// Create a TeeReader: Reads from 'file' (the request), writes to 'hasher' as it reads
+	teeReader := io.TeeReader(file, hasher)
+
+	// Copy data from TeeReader to the actual chunk file on disk
+	// This simultaneously writes the file AND calculates the hash
+	writtenBytes, err := io.Copy(chunkFile, teeReader)
+	chunkFile.Close() // Close the file handle immediately after copy
+	if err != nil {
+		// Attempt to clean up the partial file
+		os.Remove(chunkPath)
+		LogError(err, "Error writing chunk data or reading from request", map[string]interface{}{
+			"file_id": fileID,
+			"chunk":   chunkIndex,
+		})
+		jsonError(w, "Error saving chunk data", http.StatusInternalServerError)
+		return
+	}
+
+	// Calculate the final hash
+	serverHashBytes := hasher.Sum(nil)
+	serverHashHex := hex.EncodeToString(serverHashBytes)
+
+	// Compare server hash with client hash (case-insensitive)
+	if !strings.EqualFold(serverHashHex, clientHash) {
+		// Hashes don't match, delete the invalid chunk file
+		os.Remove(chunkPath)
+		LogError(nil, "Chunk hash mismatch", map[string]interface{}{
+			"file_id":     fileID,
+			"chunk":       chunkIndex,
+			"client_hash": clientHash[:min(10, len(clientHash))] + "...",       // Log prefix
+			"server_hash": serverHashHex[:min(10, len(serverHashHex))] + "...", // Log prefix
+			"bytes_read":  writtenBytes,
+		})
+		jsonError(w, "Chunk hash mismatch", http.StatusBadRequest)
+		return
+	}
+	// --- END SHA-256 Hash Verification ---
+
+	// Hash verified successfully, proceed.
+	// NOTE: The code below that previously read and wrote the chunk is now removed,
+	// as it was handled above with io.Copy and TeeReader.
 
 	// If this is the first chunk, store metadata about the file
 	if chunkIndex == 0 {
@@ -1199,8 +1308,11 @@ func (h *Handler) FinalizeUpload(w http.ResponseWriter, r *http.Request) {
 	multiReader := io.MultiReader(chunkReaders...) // Pass chunkReaders slice
 
 	// Parse expiry option
-	expiryDuration := models.ParseExpiryDuration(expiryValue)
-	expiryTime := time.Now().Add(expiryDuration)
+	var expiryTime time.Time
+	if expiryValue != "when_downloaded" {
+		expiryDuration := models.ParseExpiryDuration(expiryValue)
+		expiryTime = time.Now().Add(expiryDuration)
+	} // else leave expiryTime as zero for "when_downloaded"
 
 	// Check for encrypted sample if the file is encrypted
 	var encryptedSample []byte
@@ -1221,13 +1333,13 @@ func (h *Handler) FinalizeUpload(w http.ResponseWriter, r *http.Request) {
 
 	// Create the file metadata
 	fileMetadata := &models.File{
-		ID:         fileID,
-		Filename:   sanitizeFilename(filename),
-		MimeType:   contentType,
-		Size:       fileSize,
-		UploadTime: time.Now(),
-		ExpiryTime: expiryTime,
-		// Content:         completeFile.Bytes(), // Removed: Content is now streamed
+		ID:              fileID,
+		Filename:        sanitizeFilename(filename),
+		MimeType:        contentType,
+		Size:            fileSize,
+		UploadTime:      time.Now(),
+		ExpiryValue:     expiryValue, // Store raw value
+		ExpiryTime:      expiryTime,  // Store calculated time (or zero)
 		IsEncrypted:     isEncryptedValue,
 		EncryptedSample: encryptedSample,
 	}

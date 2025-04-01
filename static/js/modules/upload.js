@@ -136,7 +136,7 @@ function initializeUploader() {
 
         // Set and validate the expiry option
         const expiryValue = elements.jsExpiry.value;
-        const validExpiryValues = ["1h", "6h", "24h", "72h"];
+        const validExpiryValues = ["1h", "6h", "24h", "72h", "when_downloaded"];
 
         if (validExpiryValues.includes(expiryValue)) {
             elements.formExpiryInput.value = expiryValue;
@@ -347,6 +347,23 @@ function initializeUploader() {
             const end = Math.min(start + this.chunkSize, this.fileSize);
             const chunk = this.file.slice(start, end);
             const chunkActualSize = end - start;
+
+            // --- START Calculate SHA-256 Hash ---
+            let chunkHashHex = '';
+            try {
+                const chunkBuffer = await chunk.arrayBuffer();
+                const hashBuffer = await crypto.subtle.digest('SHA-256', chunkBuffer);
+                const hashArray = Array.from(new Uint8Array(hashBuffer));
+                chunkHashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+                console.log(`Chunk ${chunkIndex} hash: ${chunkHashHex.substring(0, 10)}...`); // Log first 10 chars for verification
+            } catch (hashError) {
+                console.error(`Error calculating hash for chunk ${chunkIndex}:`, hashError);
+                // Handle hash calculation error - maybe retry or abort? For now, we'll let the upload proceed without a hash or throw.
+                // Let's throw an error to make it explicit.
+                throw new Error(`Failed to calculate hash for chunk ${chunkIndex}: ${hashError.message}`);
+            }
+            // --- END Calculate SHA-256 Hash ---
+
             const formData = new FormData();
             formData.append('file', chunk, this.file.name);
             formData.append('chunk_index', chunkIndex);
@@ -356,6 +373,7 @@ function initializeUploader() {
             formData.append('filename', this.file.name);
             formData.append('expiry', this.options.getExpiry());
             formData.append('encrypted', this.options.getIsEncrypted());
+            formData.append('chunk_hash', chunkHashHex);
             const sampleBase64 = this.options.getSampleBase64();
             if (chunkIndex === 0 && sampleBase64) { formData.append('encrypted_sample', sampleBase64); }
 

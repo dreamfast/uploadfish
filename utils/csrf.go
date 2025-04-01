@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
@@ -45,13 +46,13 @@ func NewCSRFProtection(expiration time.Duration, logger Logger) *CSRFProtection 
 }
 
 // GenerateToken creates a new CSRF token
-func (c *CSRFProtection) GenerateToken() string {
+func (c *CSRFProtection) GenerateToken() (string, error) {
 	// Generate 32 bytes of random data
 	b := make([]byte, 32)
 	_, err := rand.Read(b)
 	if err != nil {
-		// If we can't get random data, use timestamp
-		return base64.StdEncoding.EncodeToString([]byte(time.Now().String()))
+		// If we can't get random data, return an error
+		return "", fmt.Errorf("failed to read random data for token: %w", err)
 	}
 
 	// Convert to base64 for URL safety
@@ -62,23 +63,26 @@ func (c *CSRFProtection) GenerateToken() string {
 	defer c.mu.Unlock()
 	c.tokens[token] = time.Now().Add(c.expiration)
 
-	return token
+	return token, nil
 }
 
 // GenerateTokenPair creates a new pair of CSRF tokens
 func (c *CSRFProtection) GenerateTokenPair() TokenPair {
 	// Generate form token
-	formToken := c.GenerateToken()
+	formToken, err := c.GenerateToken() // Check error
+	if err != nil {
+		// Panic if we cannot generate secure tokens
+		panic(fmt.Sprintf("CRITICAL: Failed to generate CSRF form token: %v", err))
+	}
 
 	// Generate cookie token
-	cookieToken := c.GenerateToken()
+	cookieToken, err := c.GenerateToken() // Check error
+	if err != nil {
+		// Panic if we cannot generate secure tokens
+		panic(fmt.Sprintf("CRITICAL: Failed to generate CSRF cookie token: %v", err))
+	}
 
-	// Store both tokens with the same expiry
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	expiry := time.Now().Add(c.expiration)
-	c.tokens[formToken] = expiry
-	c.tokens[cookieToken] = expiry
+	// Storing tokens is handled within GenerateToken calls, no need to repeat here.
 
 	return TokenPair{
 		FormToken:   formToken,
@@ -175,14 +179,21 @@ func (c *CSRFProtection) Middleware(next http.Handler) http.Handler {
 		// Look for token in various places
 		var token string
 
-		// Try URL query parameter first
+		// 1. Try URL query parameter
 		token = r.URL.Query().Get("csrf_token")
 		if token != "" && c.ValidateToken(token, cookie.Value) {
 			next.ServeHTTP(w, r)
 			return
 		}
 
-		// Check Content-Type for appropriate form parsing
+		// 2. Try Header
+		token = r.Header.Get("X-CSRF-Token")
+		if token != "" && c.ValidateToken(token, cookie.Value) {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// 3. Try Form Body (check Content-Type first)
 		contentType := r.Header.Get("Content-Type")
 
 		// For non-multipart forms, parse the regular form data
@@ -223,28 +234,21 @@ func (c *CSRFProtection) Middleware(next http.Handler) http.Handler {
 
 // GenerateRandomString creates a random string of specified length
 // Useful for generating nonces and other security tokens
-func GenerateRandomString(length int) string {
+func GenerateRandomString(length int) (string, error) {
 	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	b := make([]byte, length)
 	_, err := rand.Read(b)
 	if err != nil {
-		// If we can't get random data, use timestamp as fallback
-		// This should never happen in practice
-		timestamp := []byte(time.Now().String())
-		copy(b, timestamp)
-		if len(timestamp) < length {
-			for i := len(timestamp); i < length; i++ {
-				b[i] = charset[i%len(charset)]
-			}
-		}
-		return string(b[:length])
+		// If we can't get random data, return an error
+		// This indicates a serious system issue.
+		return "", fmt.Errorf("failed to read random data: %w", err)
 	}
 
 	// Convert random bytes to characters from charset
 	for i := range b {
 		b[i] = charset[int(b[i])%len(charset)]
 	}
-	return string(b)
+	return string(b), nil
 }
 
 // GenerateHMAC generates a Base64 encoded HMAC-SHA256 hash

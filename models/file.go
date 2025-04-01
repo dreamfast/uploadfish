@@ -49,14 +49,15 @@ func ParseExpiryDuration(value string) time.Duration {
 
 // File represents the metadata for an uploaded file
 type File struct {
-	ID              string    `json:"id"`                         // UUID for the file
-	Filename        string    `json:"filename"`                   // Original filename
-	MimeType        string    `json:"mime_type"`                  // Content type of the file
-	Size            int64     `json:"size"`                       // Size of the file in bytes
-	UploadTime      time.Time `json:"upload_time"`                // When the file was uploaded
-	ExpiryTime      time.Time `json:"expiry_time"`                // When the file will expire
-	IsEncrypted     bool      `json:"is_encrypted"`               // Whether the file is encrypted client-side
-	EncryptedSample []byte    `json:"encrypted_sample,omitempty"` // Small encrypted sample for validation
+	ID              string    `json:"id"`
+	Filename        string    `json:"filename"`
+	MimeType        string    `json:"mime_type"`
+	Size            int64     `json:"size"`
+	UploadTime      time.Time `json:"upload_time"`
+	ExpiryTime      time.Time `json:"expiry_time"`            // Used for time-based expiry
+	ExpiryValue     string    `json:"expiry_value,omitempty"` // Stores the raw selected value ("1h", "when_downloaded", etc.)
+	IsEncrypted     bool      `json:"is_encrypted"`
+	EncryptedSample []byte    `json:"encrypted_sample,omitempty"`
 }
 
 // ToJSON converts the file metadata to JSON

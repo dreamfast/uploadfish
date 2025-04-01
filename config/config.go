@@ -37,25 +37,6 @@ func New() *Config {
 		CSRFExpiration:   getEnvAsDuration("CSRF_EXPIRATION", 12*time.Hour),     // CSRF tokens expire after 12 hours (increased)
 	}
 
-	// Override with environment variables if available
-	if envPort := os.Getenv("PORT"); envPort != "" {
-		cfg.Port = envPort
-	}
-
-	if envBaseURL := os.Getenv("BASE_URL"); envBaseURL != "" {
-		cfg.BaseURL = envBaseURL
-	}
-
-	if envMaxSize := os.Getenv("MAX_UPLOAD_SIZE"); envMaxSize != "" {
-		if maxSize, err := strconv.ParseInt(envMaxSize, 10, 64); err == nil {
-			cfg.MaxUploadSize = maxSize
-		}
-	}
-
-	if envTypes := os.Getenv("ALLOWED_TYPES"); envTypes != "" {
-		cfg.AllowedTypes = strings.Split(envTypes, ",")
-	}
-
 	return cfg
 }
 
