@@ -19,9 +19,41 @@ function safeCall(fn, ...args) {
     return null;
 }
 
+// --- Tab Switching Logic --- 
+function initializeTabs() {
+    const tabLinks = document.querySelectorAll('.tab-link');
+    const tabContents = document.querySelectorAll('.tab-content');
+
+    if (!tabLinks.length || !tabContents.length) return; // No tabs on this page
+
+    tabLinks.forEach(link => {
+        link.addEventListener('click', () => {
+            const targetTabId = link.getAttribute('data-tab');
+
+            // Deactivate all links and contents
+            tabLinks.forEach(l => l.classList.remove('active'));
+            tabContents.forEach(c => {
+                c.classList.remove('active');
+                c.style.display = 'none'; // Hide explicitly
+            });
+
+            // Activate the target link and content
+            link.classList.add('active');
+            const targetContent = document.getElementById(targetTabId);
+            if (targetContent) {
+                targetContent.classList.add('active');
+                targetContent.style.display = 'block'; // Show explicitly
+            }
+        });
+    });
+}
+
 // Load modules when DOM is ready
 document.addEventListener('DOMContentLoaded', function () {
     
+    // Initialize tab switching if tabs exist
+    initializeTabs();
+
     try {
         // Check for required modules
         if (typeof DOM === 'undefined') {
