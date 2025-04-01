@@ -94,56 +94,115 @@
                     <p class="subtitle">File Upload and Sharing</p>
                 </div>
                 
-                <div class="drop-zone" id="dropZone">
-                    <div class="drop-zone-content">
-                        <div class="logo-container">
-                            <img src="/static/logo.png" alt="Upload Fish Logo" class="drop-zone-logo">
-                        </div>
-                        <div class="drop-zone-text">Drag & drop your file here</div>
-                        <button class="upload-btn" id="selectFileBtn">Select File</button>
-                        <input type="file" id="fileInput" class="hidden-input">
-                    </div>
+                <!-- Tab Navigation -->
+                <div class="tab-nav">
+                    <button class="tab-link active" data-tab="upload-tab">Upload</button>
+                    <button class="tab-link" data-tab="text-tab">Text</button>
+                    <button class="tab-link" data-tab="history-tab">History</button>
                 </div>
-                
-                <div class="file-size-info">Max file size: {{.MaxSizeMB}} MB</div>
-                
-                <div class="form-options">
-                    <div class="file-size-info">Review these options before selecting a file</div>
-                    <div class="option-row">
-                        <div class="form-group encryption-option">
-                            <input type="checkbox" id="encryptionEnabled" checked>
-                            <label for="encryptionEnabled">Encrypt File</label>
-                            <div class="tooltip">
-                                <span class="info-icon">?</span>
-                                <div class="tooltiptext">Files will be encrypted in your browser before upload. The encryption key is only shared in the link fragment (#) and never sent to the server. This means we can never see the contents of the file.</div>
+
+                <!-- Upload Tab Content -->
+                <div id="upload-tab" class="tab-content active">
+                    <div class="drop-zone" id="dropZone">
+                        <div class="drop-zone-content">
+                            <div class="logo-container">
+                                <img src="/static/logo.png" alt="Upload Fish Logo" class="drop-zone-logo">
+                            </div>
+                            <div class="drop-zone-text">Drag & drop your file here</div>
+                            <button class="upload-btn" id="selectFileBtn">Select File</button>
+                            <input type="file" id="fileInput" class="hidden-input">
+                        </div>
+                    </div>
+                    
+                    <div class="file-size-info">Max file size: {{.MaxSizeMB}} MB</div>
+                    
+                    <div class="form-options">
+                        <div class="file-size-info">Review these options before selecting a file</div>
+                        <div class="option-row">
+                            <div class="form-group encryption-option">
+                                <input type="checkbox" id="encryptionEnabled" checked>
+                                <label for="encryptionEnabled">Encrypt File</label>
+                                <div class="tooltip">
+                                    <span class="info-icon">?</span>
+                                    <div class="tooltiptext">Files will be encrypted in your browser before upload. The encryption key is only shared in the link fragment (#) and never sent to the server. This means we can never see the contents of the file.</div>
+                                </div>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="jsExpiry">Expiration Time</label>
+                                <select name="expiry" id="jsExpiry">
+                                    {{range .ExpiryOptions}}
+                                    <option value="{{.Value}}">{{.Label}}</option>
+                                    {{end}}
+                                    <option value="when_downloaded">When Downloaded</option>
+                                </select>
                             </div>
                         </div>
+                    </div>
+                    
+                    <div class="progress-container" id="progressContainer">
+                        <div class="progress">
+                            <div class="progress-bar" id="progressBar"></div>
+                        </div>
+                        <div class="progress-text" id="progressText">0%</div>
+                    </div>
+                    
+                    <form id="uploadForm" action="/upload" method="post" enctype="multipart/form-data" class="hidden-form">
+                        <input type="file" name="file" id="formFileInput">
+                        <input type="hidden" name="expiry" id="formExpiryInput">
+                        <input type="hidden" name="encrypted" id="formEncryptedInput" value="false">
+                        <input type="hidden" name="csrf_token" id="formCsrfToken" value="{{ .CSRFToken }}">
+                    </form>
+                </div> <!-- End of upload-tab -->
 
+                <!-- Text Tab Content -->
+                <div id="text-tab" class="tab-content" style="display: none;">
+                    <div class="text-upload-area">
                         <div class="form-group">
-                            <label for="jsExpiry">Expiration Time</label>
-                            <select name="expiry" id="jsExpiry">
-                                {{range .ExpiryOptions}}
-                                <option value="{{.Value}}">{{.Label}}</option>
-                                {{end}}
-                                <option value="when_downloaded">When Downloaded</option>
-                            </select>
+                            <label for="textInput">Paste your text here:</label>
+                            <textarea id="textInput" rows="10" placeholder="Enter text to upload..."></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label for="textFilename">Optional Filename:</label>
+                            <input type="text" id="textFilename" placeholder="e.g., my_notes.txt">
                         </div>
                     </div>
-                </div>
-                
-                <div class="progress-container" id="progressContainer">
-                    <div class="progress">
-                        <div class="progress-bar" id="progressBar"></div>
+                    
+                    <!-- Reuse/Copy Options -->
+                    <div class="form-options text-options">
+                         <div class="option-row">
+                            <div class="form-group encryption-option">
+                                <input type="checkbox" id="textEncryptionEnabled" checked>
+                                <label for="textEncryptionEnabled">Encrypt Text</label>
+                                <div class="tooltip">
+                                    <span class="info-icon">?</span>
+                                    <div class="tooltiptext">Text will be encrypted in your browser before upload.</div>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label for="textExpiry">Expiration Time</label>
+                                <select name="expiry" id="textExpiry">
+                                    <option value="when_downloaded">When Downloaded</option> 
+                                    {{range .ExpiryOptions}}
+                                    <option value="{{.Value}}">{{.Label}}</option>
+                                    {{end}}
+                                </select>
+                            </div>
+                        </div>
                     </div>
-                    <div class="progress-text" id="progressText">0%</div>
-                </div>
-                
-                <form id="uploadForm" action="/upload" method="post" enctype="multipart/form-data" class="hidden-form">
-                    <input type="file" name="file" id="formFileInput">
-                    <input type="hidden" name="expiry" id="formExpiryInput">
-                    <input type="hidden" name="encrypted" id="formEncryptedInput" value="false">
-                    <input type="hidden" name="csrf_token" id="formCsrfToken" value="{{ .CSRFToken }}">
-                </form>
+
+                    <div class="actions">
+                         <button class="btn btn-primary" id="uploadTextBtn">Upload Text</button>
+                    </div>
+                </div> <!-- End of text-tab -->
+
+                 <!-- History Tab Content (Placeholder) -->
+                <div id="history-tab" class="tab-content" style="display: none;">
+                     <h2>Upload History</h2>
+                     <p>Your upload history will appear here.</p>
+                     <div id="historyList"></div>
+                </div> <!-- End of history-tab -->
+
             </div>
         </div>
         

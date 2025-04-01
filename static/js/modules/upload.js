@@ -48,8 +48,20 @@ function initializeUploader() {
     // Cache elements
     const elements = _cacheDOMElements();
 
+    // Add elements specific to the Text tab
+    elements.textInput = DOM.byId('textInput');
+    elements.textFilename = DOM.byId('textFilename');
+    elements.textEncryptionEnabled = DOM.byId('textEncryptionEnabled');
+    elements.textExpiry = DOM.byId('textExpiry');
+    elements.uploadTextBtn = DOM.byId('uploadTextBtn');
+
     // Setup initial event handlers
     _setupEventHandlers(elements, handleFileSelection);
+
+    // Add event listener for the text upload button
+    if (elements.uploadTextBtn) {
+        elements.uploadTextBtn.addEventListener('click', handleTextUpload);
+    }
 
     // Handle file selection and upload
     function handleFileSelection() {
@@ -1074,7 +1086,73 @@ function initializeUploader() {
     }
 
     // --- End Progress Update Helper Functions ---
-    // --- End Helper Functions ---
+
+    // --- Handle Text Upload ---
+    function handleTextUpload() {
+        const textContent = elements.textInput.value.trim();
+        if (!textContent) {
+            showError("Please enter some text to upload.");
+            return;
+        }
+
+        // Generate filename
+        let filename = elements.textFilename.value.trim();
+        if (!filename) {
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+            filename = `text-upload-${timestamp}.txt`;
+        } else if (!filename.includes('.')) {
+            // Add .txt extension if none provided
+            filename += '.txt';
+        }
+
+        // Create Blob and File object
+        const textBlob = new Blob([textContent], { type: 'text/plain;charset=utf-8' });
+        // Use current time for lastModified
+        const textFile = new File([textBlob], filename, { type: textBlob.type, lastModified: Date.now() });
+
+        // Check size (mostly relevant if encryption balloons it)
+        if (textFile.size > maxSizeBytes) {
+            showError(`Generated text file too large (${formatFileSize(textFile.size)}). Maximum size is ${maxSizeMB} MB.`);
+            return;
+        }
+
+        console.log(`Preparing to upload text as file: ${filename}, Size: ${textFile.size}`);
+
+        // Switch UI to uploading state (similar to file upload)
+        _setupUIForUpload(); // Reuse the same UI setup
+
+        // Set expiry and encryption based on Text Tab inputs
+        const expiryValue = elements.textExpiry.value;
+        // Use the same validation array as file uploads for consistency
+        const validExpiryValues = ["1h", "6h", "24h", "72h", "when_downloaded"]; 
+        if (validExpiryValues.includes(expiryValue)) {
+            elements.formExpiryInput.value = expiryValue;
+        } else {
+            console.warn(`Invalid expiry value for text: ${expiryValue}, using default`);
+            elements.formExpiryInput.value = "1h"; // Default
+        }
+
+        // Get encryption setting from text tab's checkbox
+        const shouldEncrypt = elements.textEncryptionEnabled &&
+                          elements.textEncryptionEnabled.checked &&
+                          isEncryptionSupported;
+        elements.formEncryptedInput.value = shouldEncrypt ? "true" : "false";
+
+        // Call appropriate upload function (encrypt or regular) using the generated textFile
+        if (shouldEncrypt) {
+            updateProgress(20, getRandomEncryptionPhrase(), 'encrypting');
+            // Pass the textFile object to encryptAndUpload
+            encryptAndUpload(textFile).catch(error => {
+                console.error('Text upload process failed (encryption):', error);
+                showError('Text upload failed: ' + error.message);
+                resetUploadUI();
+            });
+        } else {
+            // Pass the textFile object to processRegularUpload
+            processRegularUpload(textFile);
+        }
+    }
+    // --- End Handle Text Upload ---
 }
 
 // Export functions
