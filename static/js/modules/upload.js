@@ -136,6 +136,28 @@ function initializeUploader() {
         }
     }
 
+    // --- Helper Function to Set Upload Options ---
+    function _setUploadOptions(expiryElementId, encryptionElementId) {
+        const expiryValue = DOM.byId(expiryElementId)?.value;
+        const validExpiryValues = ["1h", "6h", "24h", "72h", "when_downloaded"];
+
+        if (validExpiryValues.includes(expiryValue)) {
+            elements.formExpiryInput.value = expiryValue;
+        } else {
+            // Default to 1 hour if invalid or element not found
+            elements.formExpiryInput.value = "1h";
+        }
+
+        const encryptionCheckbox = DOM.byId(encryptionElementId);
+        const shouldEncrypt = encryptionCheckbox &&
+                              encryptionCheckbox.checked &&
+                              isEncryptionSupported;
+        elements.formEncryptedInput.value = shouldEncrypt ? "true" : "false";
+
+        return shouldEncrypt; // Return whether encryption is enabled
+    }
+    // --- End Helper Function ---
+
     // Prepare the upload form
     function prepareUpload(file) {
         // Setup UI elements for the upload state
@@ -146,27 +168,14 @@ function initializeUploader() {
         elements.progressBar.style.width = '0%';
         elements.progressText.textContent = '0%';
 
-        // Set and validate the expiry option
-        const expiryValue = elements.jsExpiry.value;
-        const validExpiryValues = ["1h", "6h", "24h", "72h", "when_downloaded"];
+        // Set expiry and encryption using helper
+        const shouldEncrypt = _setUploadOptions('jsExpiry', 'encryptionEnabled');
 
-        if (validExpiryValues.includes(expiryValue)) {
-            elements.formExpiryInput.value = expiryValue;
-        } else {
-            console.warn(`Invalid expiry value: ${expiryValue}, using default`);
-            elements.formExpiryInput.value = "1h"; // Default to 1 hour if invalid
-        }
-
-        // Check if encryption is enabled and supported
-        const shouldEncrypt = elements.encryptionEnabled &&
-            elements.encryptionEnabled.checked &&
-            isEncryptionSupported;
-
-        elements.formEncryptedInput.value = shouldEncrypt ? "true" : "false";
+        // No longer need separate logic here, covered by _setUploadOptions
 
         if (shouldEncrypt) {
             // Update progress to show encryption state
-            updateProgress(20, getRandomEncryptionPhrase(), 'encrypting');
+            updateProgress(null, getRandomEncryptionPhrase(), 'encrypting'); // Changed from 20%
 
             // Encrypt the file before upload (pass isTextUpload = false)
             encryptAndUpload(file, false).catch(error => {
@@ -367,11 +376,10 @@ function initializeUploader() {
                 const hashBuffer = await crypto.subtle.digest('SHA-256', chunkBuffer);
                 const hashArray = Array.from(new Uint8Array(hashBuffer));
                 chunkHashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-                console.log(`Chunk ${chunkIndex} hash: ${chunkHashHex.substring(0, 10)}...`); // Log first 10 chars for verification
+                // console.log(`Chunk ${chunkIndex} hash: ${chunkHashHex.substring(0, 10)}...`); // Removed log
             } catch (hashError) {
+                // Keep console.error for hashing issues as it indicates a client-side problem.
                 console.error(`Error calculating hash for chunk ${chunkIndex}:`, hashError);
-                // Handle hash calculation error - maybe retry or abort? For now, we'll let the upload proceed without a hash or throw.
-                // Let's throw an error to make it explicit.
                 throw new Error(`Failed to calculate hash for chunk ${chunkIndex}: ${hashError.message}`);
             }
             // --- END Calculate SHA-256 Hash ---
@@ -433,14 +441,14 @@ function initializeUploader() {
                 // Handle initial batch of tokens from chunk 0 response
                 tokensReceived = responseData.initial_chunk_tokens;
                 startIndex = 1; // Tokens are for chunks 1, 2, 3...
-                console.log(`Chunk 0: Received ${tokensReceived.length} initial tokens.`);
+                // console.log(`Chunk 0: Received ${tokensReceived.length} initial tokens.`); // Removed log
             } else if (chunkIndex > 0 && responseData.next_chunk_tokens && Array.isArray(responseData.next_chunk_tokens)) {
                  // Handle subsequent batch of tokens from chunk > 0 response
                  tokensReceived = responseData.next_chunk_tokens;
                  startIndex = chunkIndex + 1; // Tokens are for chunks N+1, N+2, N+3...
-                 console.log(`Chunk ${chunkIndex}: Received ${tokensReceived.length} next tokens.`);
+                 // console.log(`Chunk ${chunkIndex}: Received ${tokensReceived.length} next tokens.`); // Removed log
             } else {
-                 console.log(`Chunk ${chunkIndex}: Response did not contain expected token array.`);
+                 // console.log(`Chunk ${chunkIndex}: Response did not contain expected token array.`); // Removed log
                  // If a chunk response is missing tokens (and it's not near the end), something is wrong
                  // We might need more robust error checking here depending on expected server behavior
             }
@@ -451,11 +459,11 @@ function initializeUploader() {
                     const tokenForIndex = startIndex + arrayIndex;
                     if (tokenForIndex <= this.totalChunks) { // Only store if valid index
                          this.pendingTokens[tokenForIndex] = token;
-                         console.log(`Stored token for chunk ${tokenForIndex}:`, token.substring(0, 10) + "...");
+                         // console.log(`Stored token for chunk ${tokenForIndex}:`, token.substring(0, 10) + "..."); // Removed log
                          // Check if this is the final token needed
                          if (tokenForIndex === this.totalChunks) {
                              this.finalChunkToken = token;
-                             console.log(`>>> Stored FINAL token (for chunk ${tokenForIndex})`);
+                             // console.log(`>>> Stored FINAL token (for chunk ${tokenForIndex})`); // Removed log
                          }
                     }
                 });
@@ -485,7 +493,7 @@ function initializeUploader() {
                             retryCount++;
                             if (retryCount >= ChunkedUploader.MAX_RETRIES + 2) throw new Error(`Failed chunk ${chunkIndex} after ${ChunkedUploader.MAX_RETRIES + 2} rate limit retries`);
                             const delay = Math.min(Math.pow(1.5, retryCount) * 1000, 15000);
-                            console.warn(`Rate limit hit on chunk ${chunkIndex}. Retrying in ${delay / 1000}s... (${retryCount}/${ChunkedUploader.MAX_RETRIES + 2})`);
+                            // console.warn(`Rate limit hit on chunk ${chunkIndex}. Retrying in ${delay / 1000}s... (${retryCount}/${ChunkedUploader.MAX_RETRIES + 2})`); // Removed warn
                             await new Promise(resolve => setTimeout(resolve, delay));
                         } else { throw error; } // Re-throw non-rate-limit errors
                     }
@@ -500,7 +508,7 @@ function initializeUploader() {
                  throw error; 
             } finally {
                 this.activeUploads--; // Decrement active count when this attempt concludes
-                console.log(`Chunk ${chunkIndex} finished/failed. Active uploads: ${this.activeUploads}`);
+                // console.log(`Chunk ${chunkIndex} finished/failed. Active uploads: ${this.activeUploads}`); // Removed log
                 // Try to dispatch another chunk now that a slot is free
                 this._attemptToDispatchChunks(); 
             }
@@ -525,11 +533,12 @@ function initializeUploader() {
                 'X-CSRF-Token': this.currentCsrfToken // Use the current CSRF token
             };
             if (!this.finalChunkToken) {
+                // Keep this error for internal consistency checks
                 console.error("Finalize: Missing final chunk token for request.");
                 throw new Error("Internal error: Missing chunk token for finalization");
             }
             headers['X-Chunk-Token'] = this.finalChunkToken; // Send the final chunk token
-            console.log("Finalize: Sending with Final Chunk token:", this.finalChunkToken.substring(0, 10) + "...");
+            // console.log("Finalize: Sending with Final Chunk token:", this.finalChunkToken.substring(0, 10) + "..."); // Removed log
             // -----------------------------------
 
             const response = await fetch(this.options.finalizeUrl, {
@@ -551,7 +560,7 @@ function initializeUploader() {
 
         // New dispatcher logic using Set and pendingTokens map
         _attemptToDispatchChunks() {
-             console.log(`Attempting dispatch. Active: ${this.activeUploads}, Max: ${ChunkedUploader.MAX_CONCURRENT_UPLOADS}, Dispatched: ${this.dispatchedChunks.size}, Total: ${this.totalChunks}`);
+             // console.log(`Attempting dispatch. Active: ${this.activeUploads}, Max: ${ChunkedUploader.MAX_CONCURRENT_UPLOADS}, Dispatched: ${this.dispatchedChunks.size}, Total: ${this.totalChunks}`); // Removed log
              
              while (this.activeUploads < ChunkedUploader.MAX_CONCURRENT_UPLOADS && this.dispatchedChunks.size < this.totalChunks) {
                  let foundChunkToDispatch = -1;
@@ -573,7 +582,7 @@ function initializeUploader() {
                     const isChunk0 = (indexToDispatch === 0);
                     const tokenToSend = isChunk0 ? null : this.pendingTokens[indexToDispatch];
                     
-                    console.log(`Token found for chunk ${indexToDispatch}. Dispatching.`);
+                    // console.log(`Token found for chunk ${indexToDispatch}. Dispatching.`); // Removed log
                     if (!isChunk0) {
                         delete this.pendingTokens[indexToDispatch]; // Consume token
                     }
@@ -591,17 +600,17 @@ function initializeUploader() {
                        });
                 } else {
                     // No chunk found whose token is ready and hasn't been dispatched
-                    console.log(`No ready chunk found to dispatch. Waiting.`);
+                    // console.log(`No ready chunk found to dispatch. Waiting.`); // Removed log
                     break; 
                 }
             }
-             console.log(`Dispatch loop finished. Active: ${this.activeUploads}, Dispatched: ${this.dispatchedChunks.size}`);
+             // console.log(`Dispatch loop finished. Active: ${this.activeUploads}, Dispatched: ${this.dispatchedChunks.size}`); // Removed log
         }
 
         // Check if upload is complete and finalize
         async _checkCompletion() {
             if (this.completedChunks === this.totalChunks && !this.uploadComplete) {
-                 console.log("All chunks completed, attempting finalization...");
+                 // console.log("All chunks completed, attempting finalization..."); // Removed log
                  try { 
                       await this._finalizeUpload(); 
                       // Success is handled within _finalizeUpload via options.onSuccess
@@ -622,7 +631,7 @@ function initializeUploader() {
             // Abort any previous upload attempts controlled by this instance
             if (this.controller && !this.controller.signal.aborted) {
                 this.controller.abort();
-                console.log("Aborted previous upload controller.");
+                // console.log("Aborted previous upload controller."); // Removed log
             }
             // Create a new controller for this upload attempt
             this.controller = new AbortController();
@@ -655,20 +664,19 @@ function initializeUploader() {
             this.lastProgressUpdate = this.uploadStartTime;
             this.speedMeasurements = [];
 
-            console.log(`Starting upload: ${this.fileId}, Size: ${this.fileSize}, Chunks: ${this.totalChunks}, Chunk Size: ${this.chunkSize}`);
+            // console.log(`Starting upload: ${this.fileId}, Size: ${this.fileSize}, Chunks: ${this.totalChunks}, Chunk Size: ${this.chunkSize}`); // Removed log
             this._updateProgress(); // Initial 0%
 
             // Handle empty file case
             if (this.fileSize === 0) {
-                console.log("File is empty, finalizing immediately.");
+                // console.log("File is empty, finalizing immediately."); // Removed log
                  try {
-                      // Empty files don't need a chunk token for finalization?
-                      // Assuming finalize needs a token derived from chunk 0 if it existed.
-                      // Let's adjust the backend finalize to handle this case? Or send a dummy token?
-                      // For now, let's assume finalize bypasses chunk token check for size 0.
-                      // OR: we need to simulate chunk 0 token generation.
-                      // Let's try simulating token generation for empty file.
-                      this.finalChunkToken = "EMPTY_FILE_TOKEN"; // Placeholder - needs backend adjustment
+                      // Empty files require special handling on the backend for the finalization step,
+                      // as there's no preceding chunk to provide the 'finalChunkToken'.
+                      // The backend's /upload/finalize handler must account for this possibility
+                      // (e.g., by skipping the token check if total_chunks is 0 or file_size is 0).
+                      // We set a placeholder here, but it's the backend logic that matters.
+                      this.finalChunkToken = "EMPTY_FILE_PLACEHOLDER";
                       await this._finalizeUpload();
                  } catch(err) {
                       this.options.onError(err);
@@ -684,7 +692,7 @@ function initializeUploader() {
              }
 
             // Initial dispatch loop - uses _attemptToDispatchChunks
-            console.log(`Starting initial dispatch...`);
+            // console.log(`Starting initial dispatch...`); // Removed log
             this._attemptToDispatchChunks(); // Kick off the upload process
         }
 
@@ -1012,17 +1020,8 @@ function initializeUploader() {
         }
     }
 
-    // Manages the progress bar display (width, animation, crawl)
+    // Manages the progress bar display (width, animation) - Removed initial crawl
     function _updateProgressBarDisplay(percent, phase) {
-         // --- Clear the starting progress interval if phase changes or real progress arrives ---
-         if (phase !== 'uploading' || (phase === 'uploading' && percent !== null && percent > 0)) {
-              if (startingProgressInterval) {
-                 clearInterval(startingProgressInterval);
-                 startingProgressInterval = null;
-                 isUploadStarting = false;
-             }
-         }
-
         if (phase === 'encrypting') {
             elements.progressBar.classList.add('indefinite');
             elements.progressBar.style.width = '100%';
@@ -1032,12 +1031,6 @@ function initializeUploader() {
             elements.progressBar.style.transition = 'width 0.3s ease-in-out'; // Default transition
 
             if (percent !== null && percent >= 0 && percent <= 100) {
-                 // Handle transition *from* starting crawl to real progress
-                if (phase === 'uploading' && percent > 0 && isUploadStarting) {
-                    isUploadStarting = false; // Stop crawl state
-                    // Ensure smooth transition by potentially using a slightly faster animation
-                    elements.progressBar.style.transition = 'width 0.1s ease-out';
-                }
                 elements.progressBar.style.width = percent + '%';
 
                  // Set completion color
@@ -1046,94 +1039,61 @@ function initializeUploader() {
                 } else {
                      elements.progressBar.style.backgroundColor = '#4CAF50'; // Reset to default green
                 }
-
-            } else if (phase === 'uploading' && (percent === 0 || percent === null)) {
-                // --- Handle the VERY start of the upload phase (Initial Crawl) ---
-                if (!isUploadStarting) {
-                    isUploadStarting = true;
-                    elements.progressBar.style.transition = 'none';
-                    elements.progressBar.style.width = '1%';
-                    if (startingProgressInterval) clearInterval(startingProgressInterval); // Clear old one
-
-                    startingProgressInterval = setInterval(() => {
-                        if (!isUploadStarting) {
-                            clearInterval(startingProgressInterval); startingProgressInterval = null; return;
-                        }
-                        let currentWidth = parseFloat(elements.progressBar.style.width) || 0;
-                        if (currentWidth < 5) {
-                            elements.progressBar.style.transition = 'width 0.1s linear';
-                            elements.progressBar.style.width = (currentWidth + 0.2) + '%';
-                        } else {
-                            clearInterval(startingProgressInterval); startingProgressInterval = null;
-                        }
-                    }, 100);
-                }
             }
+            // Removed the 'Initial Crawl' logic here
         }
     }
 
-    // Manages the progress text display and phrase rotation interval
+    // Manages the progress text display and phrase rotation interval - Simplified rotation
     function _updateProgressTextDisplay(percent, phase, initialText = null) {
-        // Clear existing phrase rotation interval
+        // Clear existing phrase rotation interval if it exists
         if (phrasesInterval) {
             clearInterval(phrasesInterval);
             phrasesInterval = null;
         }
 
-        // --- Handle Specific States (Non-rotating text) ---
+        let textToShow = '';
+        let startRotationInterval = false;
+
+        // --- Determine Text Content ---
         if (phase === 'encrypting') {
-            elements.progressText.textContent = initialText || getRandomEncryptionPhrase();
-            // Keep rotating encryption phrases (no status alternation needed)
-            phrasesInterval = setInterval(() => {
-                elements.progressText.textContent = getRandomEncryptionPhrase();
-            }, 5000);
-            return; // Don't proceed to upload rotation logic
-        }
+            textToShow = initialText || getRandomEncryptionPhrase();
+            // Keep rotating encryption phrases
+            startRotationInterval = true;
+        } else if (percent === 100) {
+             textToShow = initialText || '100% - Complete!';
+        } else if (phase === 'uploading' || phase === 'finalizing') { // Combine upload/finalize text logic
+            // Use the stored progress percent and time/status
+            const displayPercent = Math.min(lastProgressPercent || 0, 99);
+            const statusText = phase === 'finalizing' ? 'Finalizing...' : lastTimeRemainingText; // Add finalizing text
 
-        if (percent === 100) {
-             elements.progressText.textContent = initialText || '100% - Complete!';
-             showPhraseNext = false; // Reset flag
-             return; // Don't start interval for completed state
-        }
-
-        if (phase === 'uploading' && percent === 0 && initialText) {
-            // Handle initial upload messages like "Preparing..." or "Encryption complete..."
-             elements.progressText.textContent = initialText;
-             showPhraseNext = false; // Reset flag, start with status next time
-             // Don't start the interval quite yet, wait for actual progress > 0
-             return;
-        } else if (percent === null && initialText) {
-            // Handle cases where percent might be null but we have text (e.g., initial encrypting call)
-             elements.progressText.textContent = initialText;
-             return;
-        }
-
-        // --- Handle Upload Phase Rotation --- 
-        if (phase === 'uploading' && percent !== null && percent < 100) {
-             // This function runs every interval tick
-            const updateRotatingText = () => {
-                 let textToShow = '';
-                 // Use the stored progress percent
-                 const displayPercent = Math.min(lastProgressPercent || 0, 99); 
-
-                // Decide whether to show phrase or status/time
-                if (showPhraseNext || !lastTimeRemainingText) {
-                     textToShow = `${displayPercent}% - ${getRandomFishPhrase()}`;
-                } else {
-                     textToShow = `${displayPercent}% - ${lastTimeRemainingText}`;
-                }
-
-                elements.progressText.textContent = textToShow;
-                showPhraseNext = !showPhraseNext; // Toggle for next tick
-            };
-
-             // Set initial text for this step before interval starts
-             updateRotatingText(); 
-             // Start the rotation interval
-            phrasesInterval = setInterval(updateRotatingText, 3000); // Rotate every 3 seconds
+            if (statusText) {
+                textToShow = `${displayPercent}% - ${statusText}`;
+            } else {
+                textToShow = `${displayPercent}% - ${getRandomFishPhrase()}`;
+            }
+            // Don't rotate upload phrases automatically anymore, show status/time if possible
+        } else if (initialText) {
+            // Handle initial messages like "Preparing..."
+            textToShow = initialText;
         } else {
-             // Fallback for unexpected states or non-upload phases without initialText
-             elements.progressText.textContent = ' '; // Clear text
+            // Fallback for unexpected states
+            textToShow = ' '; // Clear text
+        }
+
+        elements.progressText.textContent = textToShow;
+
+        // --- Start Interval Only for Encryption ---
+        if (startRotationInterval) {
+            phrasesInterval = setInterval(() => {
+                // Only update if still in encrypting phase (safety check)
+                if (document.body.classList.contains('encrypting-active')) {
+                    elements.progressText.textContent = getRandomEncryptionPhrase();
+                } else {
+                    clearInterval(phrasesInterval);
+                    phrasesInterval = null;
+                }
+            }, 5000); // Rotate encryption phrases every 5 seconds
         }
     }
 
@@ -1168,31 +1128,19 @@ function initializeUploader() {
             return;
         }
 
-        console.log(`Preparing to upload text as file: ${filename}, Size: ${textFile.size}`);
+        // console.log(`Preparing to upload text as file: ${filename}, Size: ${textFile.size}`); // Removed log
 
         // Switch UI to uploading state (similar to file upload)
         _setupUIForUpload(); // Reuse the same UI setup
 
-        // Set expiry and encryption based on Text Tab inputs
-        const expiryValue = elements.textExpiry.value;
-        // Use the same validation array as file uploads for consistency
-        const validExpiryValues = ["1h", "6h", "24h", "72h", "when_downloaded"]; 
-        if (validExpiryValues.includes(expiryValue)) {
-            elements.formExpiryInput.value = expiryValue;
-        } else {
-            console.warn(`Invalid expiry value for text: ${expiryValue}, using default`);
-            elements.formExpiryInput.value = "1h"; // Default
-        }
+        // Set expiry and encryption using helper for Text Tab inputs
+        const shouldEncrypt = _setUploadOptions('textExpiry', 'textEncryptionEnabled');
 
-        // Get encryption setting from text tab's checkbox
-        const shouldEncrypt = elements.textEncryptionEnabled &&
-                          elements.textEncryptionEnabled.checked &&
-                          isEncryptionSupported;
-        elements.formEncryptedInput.value = shouldEncrypt ? "true" : "false";
+        // No longer need separate logic here
 
         // Call appropriate upload function (encrypt or regular) using the generated textFile
         if (shouldEncrypt) {
-            updateProgress(20, getRandomEncryptionPhrase(), 'encrypting');
+            updateProgress(null, getRandomEncryptionPhrase(), 'encrypting'); // Changed from 20%
             // Pass the textFile object to encryptAndUpload
             encryptAndUpload(textFile, true).catch(error => {
                 console.error('Text upload process failed (encryption):', error);

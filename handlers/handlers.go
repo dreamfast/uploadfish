@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -26,6 +27,18 @@ import (
 	"github.com/prologic/bitcask"
 )
 
+// --- Constants ---
+const (
+	DefaultExpiry         = "1h"
+	CSRFCookieName        = "csrf_token"
+	CSRFHeaderName        = "X-CSRF-Token"
+	ChunkTokenHeaderName  = "X-Chunk-Token"
+	ChunkStateCleanupAge  = 3 * time.Hour
+	ChunkStateCleanupTick = 30 * time.Minute
+	// MaxChunkSizeLimit allows for large chunks plus form overhead. Tune as needed.
+	MaxChunkSizeLimit = 85 * 1024 * 1024 // 85MB
+)
+
 // Handler contains all the dependencies for the handlers
 type Handler struct {
 	Config         *config.Config
@@ -39,9 +52,12 @@ type Handler struct {
 
 // chunkState holds the validation state for an ongoing chunked upload
 type chunkState struct {
-	NextIndex    int       // The index of the next expected chunk
-	UploadSecret string    // Secret key used for HMAC token generation for this upload
-	LastUpdated  time.Time // Timestamp for cleaning up stale entries
+	NextIndex    int          // DEPRECATED: Index check removed for concurrency. Retained for potential future use/logging.
+	TotalChunks  int          // Store total chunks for validation
+	UploadSecret string       // Secret key used for HMAC token generation for this upload
+	LastUpdated  time.Time    // Timestamp for cleaning up stale entries
+	IsEmptyFile  bool         // Flag to indicate a 0-byte file upload
+	FileMetadata *models.File // Store metadata for empty files to avoid disk I/O
 }
 
 // New creates a new Handler with the given configuration
@@ -79,14 +95,14 @@ func New(cfg *config.Config, store *storage.Storage, csrfProtection *utils.CSRFP
 	}
 
 	// Start cleanup routine for chunk states
-	go h.cleanupStaleChunkStates(3 * time.Hour) // Clean up entries older than 3 hours
+	go h.cleanupStaleChunkStates(ChunkStateCleanupAge) // Use constant
 
 	return h
 }
 
 // cleanupStaleChunkStates periodically removes old chunk state entries
 func (h *Handler) cleanupStaleChunkStates(maxAge time.Duration) {
-	ticker := time.NewTicker(30 * time.Minute) // Check every 30 minutes
+	ticker := time.NewTicker(ChunkStateCleanupTick) // Use constant
 	defer ticker.Stop()
 
 	for range ticker.C {
@@ -112,7 +128,7 @@ func (h *Handler) cleanupStaleChunkStates(maxAge time.Duration) {
 func (h *Handler) Index(w http.ResponseWriter, r *http.Request) {
 	// Generate CSRF token pair
 	tokens := h.csrfProtection.GenerateTokenPair()
-	h.csrfProtection.SetTokenCookie(w, tokens.CookieToken)
+	h.csrfProtection.SetTokenCookie(w, tokens.CookieToken) // Use constant
 
 	// Prepare template data
 	data := struct {
@@ -203,7 +219,7 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 // validateCSRF validates the CSRF token and returns true if valid
 func (h *Handler) validateCSRF(w http.ResponseWriter, r *http.Request) bool {
 	csrfToken := r.FormValue("csrf_token")
-	cookie, err := r.Cookie("csrf_token")
+	cookie, err := r.Cookie(CSRFCookieName) // Use constant
 	if err != nil {
 		LogInfo("Invalid or missing CSRF token", map[string]interface{}{
 			"ip": r.RemoteAddr,
@@ -222,15 +238,13 @@ func (h *Handler) validateCSRF(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
-// processUploadedFile processes and validates an uploaded file
-func (h *Handler) processUploadedFile(file io.ReadSeeker, handler *multipart.FileHeader, r *http.Request) (*models.File, error) {
-	// Get expiry option
-	expiryValue := r.FormValue("expiry")
+// parseAndValidateExpiry parses the expiry string and returns the calculated time.
+func parseAndValidateExpiry(expiryValue string) (time.Time, string) {
 	if expiryValue == "" {
 		LogInfo("No expiry value provided, using default", map[string]interface{}{
-			"default_expiry": "1h",
+			"default_expiry": DefaultExpiry,
 		})
-		expiryValue = "1h" // Default to 1 hour if not specified
+		expiryValue = DefaultExpiry // Use constant
 	}
 
 	// Validate expiry value against allowed options
@@ -238,16 +252,26 @@ func (h *Handler) processUploadedFile(file io.ReadSeeker, handler *multipart.Fil
 	if !validExpiryValues[expiryValue] {
 		LogInfo("Invalid expiry value provided, using default", map[string]interface{}{
 			"provided_expiry": expiryValue,
-			"default_expiry":  "1h",
+			"default_expiry":  DefaultExpiry,
 		})
-		expiryValue = "1h" // Default to 1 hour if invalid
+		expiryValue = DefaultExpiry // Use constant
 	}
 
 	var expiryTime time.Time
 	if expiryValue != "when_downloaded" {
-		expiryDuration := models.ParseExpiryDuration(expiryValue)
+		expiryDuration := models.ParseExpiryDuration(expiryValue) // Assumes this handles parsing safely
 		expiryTime = time.Now().Add(expiryDuration)
-	} // else leave expiryTime as zero for "when_downloaded"
+	}
+	// else leave expiryTime as zero for "when_downloaded"
+
+	return expiryTime, expiryValue // Return validated value as well
+}
+
+// processUploadedFile processes and validates an uploaded file
+func (h *Handler) processUploadedFile(file io.ReadSeeker, handler *multipart.FileHeader, r *http.Request) (*models.File, error) {
+	// Get expiry option using helper
+	expiryValueRaw := r.FormValue("expiry")
+	expiryTime, expiryValueValidated := parseAndValidateExpiry(expiryValueRaw)
 
 	// Check if the file is encrypted client-side
 	isEncrypted := false
@@ -323,8 +347,8 @@ func (h *Handler) processUploadedFile(file io.ReadSeeker, handler *multipart.Fil
 		MimeType:        contentType,
 		Size:            size, // Use size obtained from seeking
 		UploadTime:      time.Now(),
-		ExpiryValue:     expiryValue, // Store raw value
-		ExpiryTime:      expiryTime,  // Store calculated time (or zero)
+		ExpiryValue:     expiryValueValidated, // Store validated value
+		ExpiryTime:      expiryTime,           // Store calculated time (or zero)
 		IsEncrypted:     isEncrypted,
 		EncryptedSample: encryptedSample,
 	}, nil
@@ -510,13 +534,9 @@ func servePreviewPage(w http.ResponseWriter, r *http.Request, h *Handler, fileMe
 	isAudio := strings.HasPrefix(fileMetadata.MimeType, "audio/")
 
 	// Generate CSRF token for the page
-	csrfToken, err := h.csrfProtection.GenerateToken() // Handle error
-	if err != nil {
-		LogError(err, "Failed to generate CSRF token for preview page", map[string]interface{}{"file_id": fileMetadata.ID})
-		// Don't panic here, maybe render error or proceed without CSRF?
-		// For now, proceed with an empty token, which might break forms on the page.
-		csrfToken = ""
-	}
+	// NOTE: Using GenerateTokenPair here might be safer if forms exist on preview
+	tokens := h.csrfProtection.GenerateTokenPair()
+	h.csrfProtection.SetTokenCookie(w, tokens.CookieToken) // Set cookie again if needed
 
 	// Prepare template data
 	data := struct {
@@ -553,7 +573,7 @@ func servePreviewPage(w http.ResponseWriter, r *http.Request, h *Handler, fileMe
 		IsImage:             isImage,
 		IsVideo:             isVideo,
 		IsAudio:             isAudio,
-		CSRFToken:           csrfToken,
+		CSRFToken:           tokens.FormToken, // Use form token from pair
 		IsEncrypted:         fileMetadata.IsEncrypted,
 	}
 
@@ -586,7 +606,7 @@ func formatFileSize(size int64) string {
 func (h *Handler) ErrorPage(w http.ResponseWriter, r *http.Request) {
 	// Generate CSRF token pair for error page
 	tokens := h.csrfProtection.GenerateTokenPair()
-	h.csrfProtection.SetTokenCookie(w, tokens.CookieToken)
+	h.csrfProtection.SetTokenCookie(w, tokens.CookieToken) // Use constant
 
 	errMsg := r.URL.Query().Get("message")
 	if errMsg == "" {
@@ -650,7 +670,7 @@ func (h *Handler) renderError(w http.ResponseWriter, r *http.Request, errMsg str
 
 	// Generate new CSRF token pair for error page
 	tokens := h.csrfProtection.GenerateTokenPair()
-	h.csrfProtection.SetTokenCookie(w, tokens.CookieToken)
+	h.csrfProtection.SetTokenCookie(w, tokens.CookieToken) // Use constant
 
 	// Prepare template data
 	data := struct {
@@ -784,10 +804,10 @@ func (h *Handler) renderTemplate(w http.ResponseWriter, r *http.Request, templat
 func (h *Handler) validateChunkCSRF(w http.ResponseWriter, r *http.Request) bool {
 	csrfToken := r.FormValue("csrf_token")
 	if csrfToken == "" {
-		csrfToken = r.Header.Get("X-CSRF-Token")
+		csrfToken = r.Header.Get(CSRFHeaderName) // Use constant
 	}
 
-	cookie, err := r.Cookie("csrf_token")
+	cookie, err := r.Cookie(CSRFCookieName) // Use constant
 
 	// Condition 1: Standard Double Submit Check
 	if err == nil && csrfToken != "" && h.csrfProtection.ValidateToken(csrfToken, cookie.Value) {
@@ -809,14 +829,12 @@ func (h *Handler) validateChunkCSRF(w http.ResponseWriter, r *http.Request) bool
 // ChunkUpload handles individual chunk uploads in a chunked file upload process
 func (h *Handler) ChunkUpload(w http.ResponseWriter, r *http.Request) {
 	// Set a much larger chunk size limit to accommodate dynamic chunk sizing
-	// 85MB limit allows for 80MB chunks plus form overhead
-	chunkSizeLimit := int64(85 * 1024 * 1024)
-	r.Body = http.MaxBytesReader(w, r.Body, chunkSizeLimit)
+	r.Body = http.MaxBytesReader(w, r.Body, MaxChunkSizeLimit) // Use constant
 
 	// Parse the multipart form with chunk size limit
-	if err := r.ParseMultipartForm(chunkSizeLimit); err != nil {
+	if err := r.ParseMultipartForm(MaxChunkSizeLimit); err != nil { // Use constant
 		LogError(err, "Error parsing multipart form in chunk upload", map[string]interface{}{
-			"max_size": chunkSizeLimit,
+			"max_size": MaxChunkSizeLimit,
 		})
 		jsonError(w, fmt.Sprintf("The uploaded chunk is too big: %v", err), http.StatusBadRequest)
 		return
@@ -863,6 +881,74 @@ func (h *Handler) ChunkUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// --- Handle Empty File Case Early ---
+	if fileSize == 0 && chunkIndex == 0 && totalChunks == 0 {
+		LogInfo("Detected empty file upload, preparing special state", map[string]interface{}{
+			"file_id": fileID,
+		})
+
+		h.chunkStatesMu.Lock()
+		// Generate a secret, but mark as empty file and store minimal metadata
+		uploadSecret, err := utils.GenerateRandomString(32)
+		if err != nil {
+			h.chunkStatesMu.Unlock()
+			LogError(err, "Failed to generate upload secret for empty file", nil)
+			jsonError(w, "Server error preparing empty file upload", http.StatusInternalServerError)
+			return
+		}
+
+		// Get other metadata needed for finalization
+		expiryValueRaw := r.FormValue("expiry")
+		expiryTime, expiryValueValidated := parseAndValidateExpiry(expiryValueRaw)
+		isEncrypted := r.FormValue("encrypted") == "true" // Sample not possible for empty file
+		filenameValue := r.FormValue("filename")          // Assume filename is sent as form value for empty files
+		if filenameValue == "" {
+			// Get from file handler if available (though file might be dummy)
+			_, handler, _ := r.FormFile("file") // Ignore error here, might not exist
+			if handler != nil {
+				filenameValue = handler.Filename
+			} else {
+				filenameValue = "file" // Default if still unknown
+			}
+		}
+
+		h.chunkStates[fileID] = &chunkState{
+			IsEmptyFile:  true,
+			UploadSecret: uploadSecret, // Still needed for finalization HMAC maybe? Or different validation?
+			LastUpdated:  time.Now(),
+			TotalChunks:  0,
+			FileMetadata: &models.File{ // Store metadata directly
+				ID:              fileID,
+				Filename:        sanitizeFilename(filenameValue),
+				MimeType:        "application/octet-stream", // Default for empty
+				Size:            0,
+				UploadTime:      time.Now(),
+				ExpiryValue:     expiryValueValidated,
+				ExpiryTime:      expiryTime,
+				IsEncrypted:     isEncrypted,
+				EncryptedSample: nil, // No sample for empty files
+			},
+		}
+		h.chunkStatesMu.Unlock()
+
+		// Respond immediately, telling client to finalize
+		jsonResponse(w, map[string]interface{}{
+			"status":               "success_empty_file",
+			"file_id":              fileID,
+			"message":              "Empty file detected. Proceed to finalize.",
+			"finalize_immediately": true, // Signal to client
+			// No tokens needed for empty file
+		})
+		return // Stop processing for empty file
+	}
+	// --- End Empty File Handling ---
+
+	// Validate file size against global limit (after empty file check)
+	if fileSize > h.Config.MaxUploadSize {
+		jsonError(w, fmt.Sprintf("File too large. Maximum size is %d MB.", h.Config.MaxUploadSize/(1<<20)), http.StatusBadRequest)
+		return
+	}
+
 	// --- Chunk Token Validation & Generation ---
 	var initialTokens []string // For chunk 0 response
 	var nextTokens []string    // For subsequent chunks
@@ -872,7 +958,7 @@ func (h *Handler) ChunkUpload(w http.ResponseWriter, r *http.Request) {
 	const maxConcurrent = 3 // Hardcoding for now, ideally from config or constant
 
 	if chunkIndex == 0 {
-		// First chunk: Generate initial chunk secret and calculate tokens for the initial concurrent batch
+		// First chunk (non-empty file): Generate initial chunk secret and calculate tokens for the initial concurrent batch
 		uploadSecret, err := utils.GenerateRandomString(32) // Handle error
 		if err != nil {
 			h.chunkStatesMu.Unlock()
@@ -898,7 +984,7 @@ func (h *Handler) ChunkUpload(w http.ResponseWriter, r *http.Request) {
 		}
 
 		h.chunkStates[fileID] = &chunkState{
-			NextIndex:    1, // Server still expects chunk 1 next
+			TotalChunks:  totalChunks, // Store total chunks
 			UploadSecret: uploadSecret,
 			LastUpdated:  time.Now(),
 		}
@@ -919,13 +1005,12 @@ func (h *Handler) ChunkUpload(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Get token from header
-		chunkToken := r.Header.Get("X-Chunk-Token")
+		chunkToken := r.Header.Get(ChunkTokenHeaderName) // Use constant
 
 		// --- Add Detailed Logging Inside Lock ---
 		LogInfo("Backend validating chunk (inside lock)", map[string]interface{}{
 			"file_id":               fileID,
 			"incoming_chunk_index":  chunkIndex,
-			"state_next_index":      state.NextIndex,
 			"state_secret_prefix":   state.UploadSecret[:min(5, len(state.UploadSecret))] + "...", // Log prefix only
 			"incoming_token_prefix": chunkToken[:min(10, len(chunkToken))] + "...",                // Log prefix only
 		})
@@ -938,8 +1023,7 @@ func (h *Handler) ChunkUpload(w http.ResponseWriter, r *http.Request) {
 			LogInfo("Chunk validation failed (Token mismatch)", map[string]interface{}{
 				"file_id":           fileID,
 				"received_index":    chunkIndex,
-				"expected_index":    state.NextIndex, // Log expected index for info
-				"received_token_ok": false,           // Token check failed
+				"received_token_ok": false, // Token check failed
 			})
 			// Optionally delete state here?
 			// delete(h.chunkStates, fileID)
@@ -948,9 +1032,9 @@ func (h *Handler) ChunkUpload(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Validation passed: Generate batch of tokens for subsequent chunks
-		startIndex := chunkIndex + 1 // First token to generate is for the chunk after the current one
-		endIndex := chunkIndex + 3   // Look ahead by 3 chunks
-		if endIndex > totalChunks {  // Don't generate beyond the last chunk/finalize step
+		startIndex := chunkIndex + 1           // First token to generate is for the chunk after the current one
+		endIndex := chunkIndex + maxConcurrent // Look ahead based on concurrency
+		if endIndex > totalChunks {            // Don't generate beyond the last chunk/finalize step
 			endIndex = totalChunks
 		}
 
@@ -964,18 +1048,19 @@ func (h *Handler) ChunkUpload(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// IMPORTANT: Strictly increment NextIndex only if the received chunk is the one we currently expect.
-		if chunkIndex == state.NextIndex {
-			state.NextIndex++ // Increment if this chunk was the expected next one
-		} else {
-			LogInfo("Chunk processed out of order but token was valid", map[string]interface{}{"file_id": fileID, "received_index": chunkIndex, "expected_index": state.NextIndex})
-			// DO NOT increment state.NextIndex here.
-		}
-		state.LastUpdated = time.Now()
-		LogInfo("Validated chunk and generated next batch of tokens", map[string]interface{}{
-			"file_id":          fileID,
-			"chunk":            chunkIndex,
-			"next_chunk_index": state.NextIndex, // Log the *updated* expected index
+		// IMPORTANT: Strict index increment removed for concurrency.
+		// if chunkIndex == state.NextIndex {
+		// 	state.NextIndex++ // Increment if this chunk was the expected next one
+		// } else {
+		// 	LogInfo("Chunk processed out of order but token was valid", map[string]interface{}{"file_id": fileID, "received_index": chunkIndex, "expected_index": state.NextIndex})
+		// 	// DO NOT increment state.NextIndex here.
+		// }
+		state.LastUpdated = time.Now() // Update timestamp regardless of order
+		LogInfo("Validated chunk token and generated next batch of tokens", map[string]interface{}{
+			"file_id":           fileID,
+			"chunk":             chunkIndex,
+			"next_tokens_count": len(nextTokens),
+			"next_token_range":  fmt.Sprintf("%d-%d", startIndex, endIndex),
 		})
 	}
 
@@ -1178,7 +1263,66 @@ func (h *Handler) FinalizeUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get chunks directory
+	// --- Handle Empty File Finalization ---
+	h.chunkStatesMu.Lock()
+	state, exists := h.chunkStates[fileID]
+	if exists && state.IsEmptyFile {
+		LogInfo("Finalizing empty file upload", map[string]interface{}{"file_id": fileID})
+		emptyMetadata := state.FileMetadata // Get stored metadata
+		// It's crucial that emptyMetadata was correctly populated in ChunkUpload
+		if emptyMetadata == nil {
+			delete(h.chunkStates, fileID) // Clean up state
+			h.chunkStatesMu.Unlock()
+			LogError(nil, "Internal error: Missing metadata for empty file finalization", map[string]interface{}{"file_id": fileID})
+			jsonError(w, "Internal server error during empty file finalization", http.StatusInternalServerError)
+			return
+		}
+
+		// No token validation needed for empty file
+
+		// "Save" the empty file to storage
+		if err := h.Storage.SaveFile(emptyMetadata, bytes.NewReader(nil)); err != nil {
+			delete(h.chunkStates, fileID) // Clean up state even on error
+			h.chunkStatesMu.Unlock()
+			LogError(err, "Error saving empty file to storage", map[string]interface{}{
+				"file_id": emptyMetadata.ID,
+			})
+			jsonError(w, fmt.Sprintf("Error saving empty file: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		// Success - clean up state and respond
+		delete(h.chunkStates, fileID)
+		h.chunkStatesMu.Unlock()
+
+		LogInfo("Empty file finalized successfully", map[string]interface{}{
+			"filename":  emptyMetadata.Filename,
+			"file_id":   emptyMetadata.ID,
+			"mime_type": emptyMetadata.MimeType, // Should be default
+		})
+
+		previewURL := fmt.Sprintf("%s/file/%s", h.getBaseURL(r), emptyMetadata.ID)
+		jsonResponse(w, map[string]interface{}{
+			"status":       "success",
+			"file_id":      emptyMetadata.ID,
+			"redirect_url": previewURL,
+		})
+		return // Finalization complete for empty file
+	}
+	// If not empty or state doesn't exist, continue normal finalize flow...
+	// Release lock if we didn't return early
+	if exists { // Only unlock if we held it and didn't return
+		h.chunkStatesMu.Unlock()
+	} else {
+		// State didn't exist, log and error out
+		h.chunkStatesMu.Unlock() // Must unlock even if state wasn't found
+		LogInfo("Chunk state not found during finalize (non-empty path)", map[string]interface{}{"file_id": fileID})
+		jsonError(w, "Invalid upload state or file ID.", http.StatusBadRequest)
+		return
+	}
+	// --- End Empty File Finalization ---
+
+	// Get chunks directory (Normal path continues here)
 	chunksDir := filepath.Join(os.TempDir(), "uploadfish", "chunks", fileID)
 	if _, err := os.Stat(chunksDir); os.IsNotExist(err) {
 		LogError(err, "Chunks directory not found", map[string]interface{}{
@@ -1219,7 +1363,7 @@ func (h *Handler) FinalizeUpload(w http.ResponseWriter, r *http.Request) {
 	fileSize := int64(fileSizeFloat)
 	contentType, _ := metadata["content_type"].(string)
 	isEncryptedValue, _ := metadata["is_encrypted"].(bool)
-	expiryValue, _ := metadata["expiry"].(string)
+	expiryValueRaw, _ := metadata["expiry"].(string)
 
 	// Validate content type if available
 	if contentType != "" {
@@ -1236,34 +1380,33 @@ func (h *Handler) FinalizeUpload(w http.ResponseWriter, r *http.Request) {
 	// --- Validate Final Chunk Token ---
 	h.chunkStatesMu.Lock() // Lock before accessing shared state
 
-	state, exists := h.chunkStates[fileID]
+	state, exists = h.chunkStates[fileID] // Re-fetch state under lock
 	if !exists {
 		h.chunkStatesMu.Unlock()
-		LogInfo("Chunk state not found during finalize", map[string]interface{}{"file_id": fileID})
+		LogInfo("Chunk state not found during finalize token check", map[string]interface{}{"file_id": fileID})
 		jsonError(w, "Invalid upload state or file ID.", http.StatusBadRequest)
 		return
 	}
 
 	// Get the final token from the header
-	finalChunkToken := r.Header.Get("X-Chunk-Token")
+	finalChunkToken := r.Header.Get(ChunkTokenHeaderName) // Use constant
 
-	// Validate token and ensure all chunks were processed (Removed index check)
-	// Recalculate the expected token for the final chunk
+	// Validate token using the total chunks from metadata
+	// Note: If totalChunks calculation client-side was off, this could fail.
 	expectedToken := utils.GenerateHMAC(state.UploadSecret, fmt.Sprintf("chunk%d", totalChunks))
 	if finalChunkToken != expectedToken {
+		// Keep state for potential retries? Or delete? For now, delete.
+		delete(h.chunkStates, fileID)
 		h.chunkStatesMu.Unlock()
 		LogInfo("Final chunk token validation failed (Token mismatch)", map[string]interface{}{
-			"file_id":           fileID,
-			"final_token_ok":    false,
-			"expected_index":    totalChunks,
-			"actual_next_index": state.NextIndex, // Log state for info
+			"file_id":        fileID,
+			"final_token_ok": false,
+			"expected_index": totalChunks, // Index used for token calculation
+			// "actual_next_index": state.NextIndex, // Removed next_index logging
 		})
-		// Delete invalid state to prevent reuse
-		delete(h.chunkStates, fileID)
 		jsonError(w, fmt.Sprintf("Invalid finalization token (expected %d chunks).", totalChunks), http.StatusForbidden)
 		return
 	}
-
 	// Validation passed, remove the state entry
 	delete(h.chunkStates, fileID)
 	h.chunkStatesMu.Unlock() // Unlock after accessing shared state
@@ -1281,10 +1424,11 @@ func (h *Handler) FinalizeUpload(w http.ResponseWriter, r *http.Request) {
 		chunkPath := filepath.Join(chunksDir, fmt.Sprintf("chunk_%d", i))
 		file, err := os.Open(chunkPath)
 		if err != nil {
-			// Clean up already opened files before returning error
-			for _, f := range chunkFiles {
-				_ = f.Close()
+			// <<< FIX: Clean up already opened files >>>
+			for _, openedFile := range chunkFiles {
+				_ = openedFile.Close() // Attempt to close previously opened files
 			}
+			// <<< END FIX >>>
 			LogError(err, "Error opening chunk file for streaming", map[string]interface{}{
 				"file_id":    fileID,
 				"chunk":      i,
@@ -1307,12 +1451,8 @@ func (h *Handler) FinalizeUpload(w http.ResponseWriter, r *http.Request) {
 	// Create a MultiReader to stream from all chunks sequentially
 	multiReader := io.MultiReader(chunkReaders...) // Pass chunkReaders slice
 
-	// Parse expiry option
-	var expiryTime time.Time
-	if expiryValue != "when_downloaded" {
-		expiryDuration := models.ParseExpiryDuration(expiryValue)
-		expiryTime = time.Now().Add(expiryDuration)
-	} // else leave expiryTime as zero for "when_downloaded"
+	// Parse expiry option using helper
+	expiryTime, expiryValueValidated := parseAndValidateExpiry(expiryValueRaw)
 
 	// Check for encrypted sample if the file is encrypted
 	var encryptedSample []byte
@@ -1337,9 +1477,9 @@ func (h *Handler) FinalizeUpload(w http.ResponseWriter, r *http.Request) {
 		Filename:        sanitizeFilename(filename),
 		MimeType:        contentType,
 		Size:            fileSize,
-		UploadTime:      time.Now(),
-		ExpiryValue:     expiryValue, // Store raw value
-		ExpiryTime:      expiryTime,  // Store calculated time (or zero)
+		UploadTime:      time.Now(),           // Consider using upload_time from metadata?
+		ExpiryValue:     expiryValueValidated, // Store validated value
+		ExpiryTime:      expiryTime,           // Store calculated time (or zero)
 		IsEncrypted:     isEncryptedValue,
 		EncryptedSample: encryptedSample,
 	}
@@ -1394,61 +1534,10 @@ func jsonResponse(w http.ResponseWriter, data map[string]interface{}) {
 	json.NewEncoder(w).Encode(data)
 }
 
-// combineChunksAndDetectType combines chunk files into a final file and detects MIME type.
-func combineChunksAndDetectType(chunksDir, finalPath string, totalChunks int) (string, error) {
-	finalFile, err := os.Create(finalPath)
-	if err != nil {
-		LogError(err, "Error creating final file path", map[string]interface{}{"final_path": finalPath})
-		return "", fmt.Errorf("server error creating final file")
+// Utility function to get min of two integers
+func min(a, b int) int {
+	if a < b {
+		return a
 	}
-	defer finalFile.Close()
-
-	// Combine all chunks first
-	for i := 0; i < totalChunks; i++ {
-		chunkPath := filepath.Join(chunksDir, fmt.Sprintf("chunk_%d", i))
-		chunkFile, err := os.Open(chunkPath)
-		if err != nil {
-			LogError(err, "Error opening chunk file for combining", map[string]interface{}{"chunk_path": chunkPath, "chunk_index": i})
-			finalFile.Close()        // Close the potentially partially written file
-			_ = os.Remove(finalPath) // Attempt cleanup
-			return "", fmt.Errorf("error reading chunk %d", i)
-		}
-
-		_, err = io.Copy(finalFile, chunkFile)
-		chunkFile.Close() // Close chunk immediately
-		if err != nil {
-			LogError(err, "Error copying chunk data to final file", map[string]interface{}{"chunk_path": chunkPath, "chunk_index": i})
-			finalFile.Close()
-			_ = os.Remove(finalPath)
-			return "", fmt.Errorf("error writing chunk %d to final file", i)
-		}
-	}
-
-	// Close the writer to the final file
-	if err := finalFile.Close(); err != nil {
-		LogError(err, "Error closing final file after writing chunks", map[string]interface{}{"final_path": finalPath})
-		_ = os.Remove(finalPath)
-		return "", fmt.Errorf("error finalizing file write")
-	}
-
-	// Now, reopen the combined file to detect its type from the beginning
-	fileForDetect, err := os.Open(finalPath)
-	if err != nil {
-		LogError(err, "Error reopening final file for type detection", map[string]interface{}{"final_path": finalPath})
-		return "", fmt.Errorf("error opening file for type detection")
-	}
-	defer fileForDetect.Close()
-
-	// Read the first 512 bytes for type detection
-	buffer := make([]byte, 512)
-	n, err := fileForDetect.Read(buffer)
-	if err != nil && err != io.EOF {
-		LogError(err, "Error reading from final file for type detection", map[string]interface{}{"final_path": finalPath})
-		return "", fmt.Errorf("error reading file for type detection")
-	}
-
-	// Detect content type
-	detectedContentType := http.DetectContentType(buffer[:n])
-
-	return detectedContentType, nil
+	return b
 }
