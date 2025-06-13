@@ -30,6 +30,7 @@ function initializePreviewPage() {
 
 // Module-scoped variable for phrase interval
 let previewPhrasesInterval = null;
+let currentDownloadPhrase = ''; // ADD THIS FOR STABLE PHRASE DURING DOWNLOAD
 
 // Handle encrypted file preview functionality
 function handleEncryptedPreview() {
@@ -491,58 +492,64 @@ function _updateDownloadProgressTextDisplay(percent, message, phase) {
     const progressBar = DOM.byId('downloadProgressBar'); // Needed for interval
     if (!progressText || !progressBar) return;
 
-    // Clear existing interval
-    if (previewPhrasesInterval) {
+    // 1. Clear interval if the phase is changing away from a rotating one
+    if (phase !== 'downloading' && phase !== 'decrypting' && previewPhrasesInterval) {
         clearInterval(previewPhrasesInterval);
         previewPhrasesInterval = null;
+        currentDownloadPhrase = ''; // Reset phrase
     }
-
+    
     let textContent = message;
-    let startRotation = false;
+    
+    // 2. Handle 'downloading' phase
+    if (phase === 'downloading') {
+        if (!previewPhrasesInterval) {
+            // First tick of download progress: set initial phrase and start the 5s rotator
+            currentDownloadPhrase = getRandomDownloadingPhrase();
+            
+            previewPhrasesInterval = setInterval(() => {
+                // This runs every 5 seconds
+                if (document.body.classList.contains('downloading-active')) {
+                    const currentPercent = parseInt(progressBar.style.width, 10) || 0;
+                    currentDownloadPhrase = getRandomDownloadingPhrase(); // Get a new phrase
+                    progressText.textContent = `${currentPercent}% - ${currentDownloadPhrase}`;
+                } else {
+                    // Safety break if phase changes without this function being called
+                    clearInterval(previewPhrasesInterval);
+                    previewPhrasesInterval = null;
+                }
+            }, 5000);
+        }
+        
+        // For every tick of download progress, update text with the latest percent and the CURRENT phrase
+        textContent = `${percent !== null ? percent : 0}% - ${currentDownloadPhrase}`;
 
-    // Determine text and if rotation is needed
-    if (phase === 'downloading' || phase === 'decrypting' || phase === 'validating') {
-         if (!textContent) {
-             if (phase === 'downloading') {
-                 textContent = (percent !== null ? percent : 0) + '% - ' + getRandomDownloadingPhrase();
-                 startRotation = true;
-             } else if (phase === 'decrypting') {
-                 textContent = getRandomDecryptingPhrase();
-                 startRotation = true;
-             } else { // validating
-                 textContent = "Validating...";
-                 // Optionally start rotation for validating if desired
-                 // startRotation = true;
+    // 3. Handle other phases
+    } else if (phase === 'decrypting') {
+        // Decrypting is a single step, so we can use an interval for visual effect
+         if (!message) {
+             textContent = getRandomDecryptingPhrase();
+             if (!previewPhrasesInterval) { // Avoid stacking intervals
+                 previewPhrasesInterval = setInterval(() => {
+                     if (document.body.classList.contains('decrypting-active')) {
+                         progressText.textContent = getRandomDecryptingPhrase();
+                     } else {
+                         clearInterval(previewPhrasesInterval);
+                         previewPhrasesInterval = null;
+                     }
+                 }, 5000);
              }
          }
-          else if (phase !== 'complete' && phase !== 'error') {
-               startRotation = true;
-          }
+    } else if (phase === 'validating' && !textContent) {
+        textContent = "Validating...";
+    } else if (phase === 'complete' && !textContent) {
+        textContent = 'Complete!';
+    } else if (phase === 'error' && !textContent) {
+        textContent = 'Error!';
     }
-     else if (phase === 'complete' && !textContent) {
-         textContent = 'Complete!';
-     } else if (phase === 'error' && !textContent) {
-          textContent = 'Error!'; // Generic error if no message provided
-     }
-
-    // Set the text
-    progressText.textContent = textContent || ' '; // Default to empty space
-
-    // Start interval if needed
-    if (startRotation) {
-        previewPhrasesInterval = setInterval(() => {
-           if (phase === 'downloading') {
-               const currentPercent = parseInt(progressBar.style.width) || 0;
-               progressText.textContent = currentPercent + '% - ' + getRandomDownloadingPhrase();
-           } else if (phase === 'decrypting') {
-                progressText.textContent = getRandomDecryptingPhrase();
-           } else { // validating - clear interval if it runs unexpectedly
-                // progressText.textContent = getRandomValidatingPhrase();
-                if (previewPhrasesInterval) clearInterval(previewPhrasesInterval);
-                 previewPhrasesInterval = null;
-           }
-        }, 5000);
-    }
+    
+    // 4. Set the final text content
+    progressText.textContent = textContent || ' ';
 }
 
 // --- End Download Progress Helper Functions ---
