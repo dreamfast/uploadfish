@@ -489,54 +489,49 @@ function _updateDownloadProgressBarDisplay(percent, phase) {
 
 function _updateDownloadProgressTextDisplay(percent, message, phase) {
     const progressText = DOM.byId('downloadProgressText');
-    const progressBar = DOM.byId('downloadProgressBar'); // Needed for interval
+    const progressBar = DOM.byId('downloadProgressBar');
     if (!progressText || !progressBar) return;
 
-    // 1. Clear interval if the phase is changing away from a rotating one
-    if (phase !== 'downloading' && phase !== 'decrypting' && previewPhrasesInterval) {
+    // --- REVISED LOGIC v2 ---
+
+    // 1. Clear any existing interval when the phase ends or changes.
+    const isRotatingPhase = phase === 'downloading' || phase === 'decrypting';
+    if (!isRotatingPhase && previewPhrasesInterval) {
         clearInterval(previewPhrasesInterval);
         previewPhrasesInterval = null;
-        currentDownloadPhrase = ''; // Reset phrase
+        currentDownloadPhrase = '';
     }
-    
+
     let textContent = message;
-    
+
     // 2. Handle 'downloading' phase
     if (phase === 'downloading') {
+        const displayPercent = percent !== null ? percent : parseInt(progressBar.style.width, 10) || 0;
+
         if (!previewPhrasesInterval) {
-            // First tick of download progress: set initial phrase and start the 5s rotator
+            // First tick: Set initial phrase and start the rotator
             currentDownloadPhrase = getRandomDownloadingPhrase();
             
             previewPhrasesInterval = setInterval(() => {
-                // This runs every 5 seconds
-                if (document.body.classList.contains('downloading-active')) {
-                    const currentPercent = parseInt(progressBar.style.width, 10) || 0;
-                    currentDownloadPhrase = getRandomDownloadingPhrase(); // Get a new phrase
-                    progressText.textContent = `${currentPercent}% - ${currentDownloadPhrase}`;
-                } else {
-                    // Safety break if phase changes without this function being called
-                    clearInterval(previewPhrasesInterval);
-                    previewPhrasesInterval = null;
-                }
+                // Every 5s: get a new phrase and update the text.
+                // This is now the ONLY place the phrase changes.
+                const currentPercent = parseInt(progressBar.style.width, 10) || 0;
+                currentDownloadPhrase = getRandomDownloadingPhrase();
+                progressText.textContent = `${currentPercent}% - ${currentDownloadPhrase}`;
             }, 5000);
         }
         
-        // For every tick of download progress, update text with the latest percent and the CURRENT phrase
-        textContent = `${percent !== null ? percent : 0}% - ${currentDownloadPhrase}`;
+        // On every progress update, just update the text with the current phrase.
+        textContent = `${displayPercent}% - ${currentDownloadPhrase}`;
 
     // 3. Handle other phases
     } else if (phase === 'decrypting') {
-        // Decrypting is a single step, so we can use an interval for visual effect
          if (!message) {
-             textContent = getRandomDecryptingPhrase();
-             if (!previewPhrasesInterval) { // Avoid stacking intervals
+             textContent = getRandomDecryptingPhrase(); // Initial phrase
+             if (!previewPhrasesInterval) {
                  previewPhrasesInterval = setInterval(() => {
-                     if (document.body.classList.contains('decrypting-active')) {
-                         progressText.textContent = getRandomDecryptingPhrase();
-                     } else {
-                         clearInterval(previewPhrasesInterval);
-                         previewPhrasesInterval = null;
-                     }
+                     // Rotate phrase every 5s while decrypting
+                     progressText.textContent = getRandomDecryptingPhrase();
                  }, 5000);
              }
          }
