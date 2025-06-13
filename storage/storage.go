@@ -256,9 +256,10 @@ func (s *Storage) ListExpiredFiles() ([]string, error) {
 	return expiredIDs, nil
 }
 
-// CleanupExpiredFiles deletes files that have expired
+// CleanupExpiredFiles deletes files that have expired. If any files are deleted,
+// it will trigger a database merge to reclaim disk space.
 func (s *Storage) CleanupExpiredFiles() error {
-	// Get list of expired files
+	s.logger.Info("Starting cleanup of expired files", nil)
 	expiredIDs, err := s.ListExpiredFiles()
 	if err != nil {
 		return fmt.Errorf("error listing expired files: %w", err)
@@ -275,15 +276,37 @@ func (s *Storage) CleanupExpiredFiles() error {
 	}
 
 	if len(expiredIDs) > 0 {
-		s.logger.Info("Cleanup complete", map[string]interface{}{
-			"deleted_count": len(expiredIDs),
-		})
+		s.logger.Info("Finished cleanup of expired files", map[string]interface{}{"count": len(expiredIDs)})
+		// After cleaning up files, trigger a merge to reclaim space.
+		if err := s.Merge(); err != nil {
+			// Log the error, but don't return it as the primary task was successful
+			s.logger.Error(err, "Error during post-cleanup merge", nil)
+		}
 	}
 
 	return nil
 }
 
-// startCleanupRoutine starts a goroutine to periodically clean up expired files
+// Merge triggers a database merge to reclaim disk space
+func (s *Storage) Merge() error {
+	s.logger.Info("Starting database merge", nil)
+	start := time.Now()
+	if err := s.db.Merge(); err != nil {
+		s.logger.Error(err, "Failed to merge database", nil)
+		return fmt.Errorf("failed to merge database: %w", err)
+	}
+	duration := time.Since(start)
+	s.logger.Info("Finished database merge", map[string]interface{}{"duration": duration.String()})
+
+	return nil
+}
+
+// Stats returns statistics about the database.
+func (s *Storage) Stats() (bitcask.Stats, error) {
+	return s.db.Stats()
+}
+
+// startCleanupRoutine starts a background goroutine to clean up expired files
 func (s *Storage) startCleanupRoutine() {
 	ticker := time.NewTicker(s.config.CleanupInterval)
 	defer ticker.Stop()
